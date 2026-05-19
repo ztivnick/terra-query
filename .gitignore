@@ -1,0 +1,68 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# logs
+*.log
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+.python-version
+
+# node / frontend
+node_modules/
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# bulk data and weights (NEVER commit)
+data/
+*.tif
+*.tiff
+*.las
+*.laz
+*.copc
+*.gpkg
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.sqlite3
+*.dump
+
+# notebooks - strip outputs but ignore checkpoints
+.ipynb_checkpoints/
+
+# macos
+.DS_Store
+
+# editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# cline state
+.cline/
+
+# ai pipeline (per your preference: kept local only)
+.clinerules/
+.clineignore
+docs/architecture_plans/
+implementation_plan.md
