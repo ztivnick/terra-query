@@ -22,7 +22,6 @@ env/
 coverage.xml
 htmlcov/
 *.egg-info/
-.python-version
 
 # node / frontend
 node_modules/
@@ -64,5 +63,5 @@ data/
 # ai pipeline (per your preference: kept local only)
 .clinerules/
 .clineignore
-docs/architecture_plans/
+docs/
 implementation_plan.md
