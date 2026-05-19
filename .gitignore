@@ -65,3 +65,6 @@ data/
 .clineignore
 docs/
 implementation_plan.md
+CLAUDE.md
+CLAUDE.local.md
+.claude/
