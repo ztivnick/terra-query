@@ -4,7 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
     "geopandas>=1.1.3",
+    "planetary-computer>=1.0.0",
     "pyproj>=3.7.2",
+    "pystac-client>=0.9.0",
     "rasterio>=1.5.0",
     "requests>=2.34.2",
     "rich>=15.0.0",
@@ -30,6 +32,9 @@ module = [
     "pyogrio", "pyogrio.*",
     "rasterio", "rasterio.*",
     "rio_cogeo", "rio_cogeo.*",
+    "pystac", "pystac.*",
+    "pystac_client", "pystac_client.*",
+    "planetary_computer", "planetary_computer.*",
 ]
 ignore_missing_imports = true
 
