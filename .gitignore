@@ -31,7 +31,6 @@ dist/
 *.tsbuildinfo
 
 # bulk data and weights (NEVER commit)
-data/
 *.tif
 *.tiff
 *.las
