@@ -1,0 +1,19 @@
+terra-query working CRS verification
+====================================
+
+Pinned CRS                  : EPSG:26916 (NAD83 / UTM Zone 16N, meters)
+
+Area of use (WGS84 W,S,E,N) : (-90.0, 23.97, -84.0, 84.0)
+AOI bbox    (WGS84 W,S,E,N) : (-89.1653, 46.3872, -89.1001, 46.4322)
+AOI bbox    (26916 E,N,E,N) : (333511.040, 5139212.617, 338656.930, 5144347.779)
+
+AOI area (26916)            : 25073377.970 m^2 (25.07338 km^2)
+AOI area (S1 haversine)     : 25.0 km^2
+Relative diff               : 0.2935%
+
+Round-trip 4326 -> 26916 -> 4326 across 5 AOI vertices + 11 eval points:
+Max coordinate error        : 7.11e-15 deg (tolerance 1e-7)
+
+Artifacts:
+- data/aoi/bond_falls_block_26916.geojson
+- data/eval/known_features_26916.geojson

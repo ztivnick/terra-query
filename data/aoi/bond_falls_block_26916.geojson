@@ -1,0 +1,79 @@
+{
+  "type": "FeatureCollection",
+  "name": "bond_falls_block",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:EPSG::26916"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Bond Falls block",
+        "center_lat": 46.4097,
+        "center_lon": -89.1327,
+        "width_km": 5.0,
+        "height_km": 5.0,
+        "area_km2": 25.0,
+        "river": "Middle Branch Ontonagon River",
+        "anchor_feature": "Bond Falls",
+        "inner_bbox_wgs84": {
+          "min_lon": -89.1457,
+          "max_lon": -89.1197,
+          "min_lat": 46.4007,
+          "max_lat": 46.4187,
+          "note": "original 2 km x 2 km core retained as a subset of the expanded AOI."
+        },
+        "expansion_history": [
+          {
+            "size": "2 km x 2 km",
+            "area_km2": 4.0,
+            "stage": "initial draft"
+          },
+          {
+            "size": "4 km x 4 km",
+            "area_km2": 16.0,
+            "stage": "user expansion for unmapped-feature coverage"
+          },
+          {
+            "size": "5 km x 5 km",
+            "area_km2": 25.0,
+            "stage": "user expansion to include Barclay Cemetery (49 m outside prior south edge) plus buffer"
+          }
+        ],
+        "notes": "axis-aligned in WGS84. center is Bond Falls (Wikipedia / World Waterfall Database / GNIS, ~46.4097, -89.1327). half-width derived as 2.5 km / (111.32 km * cos(46.4 deg)) = 0.03257 deg lon, 2.5 km / 111.13 km = 0.02250 deg lat. corner rounding kept to 4 decimal places (~11 m). strategy doc said 'West Branch'; verified Middle Branch via Wikipedia + World Waterfall Database.",
+        "area_m2_projected": 25073377.97,
+        "working_crs": "EPSG:26916"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              333511.04,
+              5139347.782
+            ],
+            [
+              338524.131,
+              5139212.617
+            ],
+            [
+              338656.93,
+              5144212.624
+            ],
+            [
+              333647.965,
+              5144347.779
+            ],
+            [
+              333511.04,
+              5139347.782
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

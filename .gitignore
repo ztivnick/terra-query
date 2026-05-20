@@ -44,6 +44,35 @@ dist/
 *.sqlite3
 *.dump
 
+# more bulk binary geo formats (downloaded raw data; regenerable)
+*.pbf
+*.fgb
+*.kmz
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+
+# derived arrays and indices (embeddings, vector stores; regenerable)
+*.npy
+*.npz
+*.parquet
+*.feather
+*.arrow
+*.h5
+*.hdf5
+*.faiss
+
+# raster sidecars (GDAL stats / overviews / world files; regenerated on open)
+*.aux.xml
+*.ovr
+*.tfw
+*.wld
+
+# zarr (directory-shaped binary)
+*.zarr/
+
 # notebooks - strip outputs but ignore checkpoints
 .ipynb_checkpoints/
 
