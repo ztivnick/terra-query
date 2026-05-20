@@ -40,12 +40,16 @@ MODEL_WEIGHTS_DIR = SOURCE_DOWNLOADS / "model_weights"
 # pipeline_outputs/
 AOI_26916 = PIPELINE_OUTPUTS / "aoi" / "bond_falls_block_26916.geojson"
 EVAL_26916 = PIPELINE_OUTPUTS / "eval" / "known_features_26916.geojson"
+CHIPS_DIR = PIPELINE_OUTPUTS / "chips"
+CHIP_INDEX_JSON = CHIPS_DIR / "chip_index.json"
+CHIP_EVAL_DIR = CHIPS_DIR / "eval"
 
 # verification/
 CRS_VERIFICATION = VERIFICATION / "crs_verification.txt"
 EVAL_CHIPS_DIR = VERIFICATION / "eval_chips"
 GATE_DIR = VERIFICATION / "gate"
 OVERLAY_PNG = GATE_DIR / "overlay_check.png"
+CHIP_GRID_OVERVIEW_PNG = GATE_DIR / "chip_grid_overview.png"
 RUN_LOGS_DIR = VERIFICATION / "runs"
 
 
@@ -59,3 +63,7 @@ def s2_cog(date_str: str) -> Path:
 
 def eval_chip(feature_id: str) -> Path:
     return EVAL_CHIPS_DIR / f"{feature_id}.png"
+
+
+def chip_eval(feature_id: str) -> Path:
+    return CHIP_EVAL_DIR / f"{feature_id}.png"
