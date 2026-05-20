@@ -1,25 +1,19 @@
 """Reproject S1 vector artifacts into the working CRS and write a verification report.
 
-Reads:
-- data/aoi/bond_falls_block.geojson (WGS84)
-- data/eval/known_features.geojson  (WGS84)
+Reads the AOI + eval set from `human_authored/`, writes their 26916
+counterparts to `pipeline_outputs/`, and a verification report to
+`verification/`. Idempotent: rerunning produces byte-identical output.
 
-Writes:
-- data/aoi/bond_falls_block_26916.geojson
-- data/eval/known_features_26916.geojson
-- data/crs_verification.txt
-
-Idempotent: rerunning produces byte-identical output.
+    uv run python -m terra_query.ingest.cli.reproject_inputs
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from shapely.geometry import Polygon
 
-from terra_query.crs import (
+from terra_query.core.crs import (
     WORKING_CRS,
     WORKING_CRS_EPSG,
     area_of_use_bounds,
@@ -27,13 +21,14 @@ from terra_query.crs import (
     to_wgs84,
     to_working,
 )
-
-REPO = Path(__file__).resolve().parents[2]
-AOI_IN = REPO / "data" / "aoi" / "bond_falls_block.geojson"
-AOI_OUT = REPO / "data" / "aoi" / "bond_falls_block_26916.geojson"
-EVAL_IN = REPO / "data" / "eval" / "known_features.geojson"
-EVAL_OUT = REPO / "data" / "eval" / "known_features_26916.geojson"
-REPORT = REPO / "data" / "crs_verification.txt"
+from terra_query.core.paths import (
+    AOI_26916,
+    AOI_WGS84,
+    CRS_VERIFICATION,
+    EVAL_26916,
+    EVAL_WGS84,
+    REPO_ROOT,
+)
 
 CRS_BLOCK_26916 = {
     "type": "name",
@@ -152,24 +147,27 @@ def write_report(
         f"Max coordinate error        : {max_err:.2e} deg (tolerance 1e-7)\n"
         "\n"
         "Artifacts:\n"
-        f"- {AOI_OUT.relative_to(REPO)}\n"
-        f"- {EVAL_OUT.relative_to(REPO)}\n"
+        f"- {AOI_26916.relative_to(REPO_ROOT)}\n"
+        f"- {EVAL_26916.relative_to(REPO_ROOT)}\n"
     )
-    REPORT.write_text(text)
+    CRS_VERIFICATION.parent.mkdir(parents=True, exist_ok=True)
+    CRS_VERIFICATION.write_text(text)
     return text
 
 
 def main() -> None:
-    fc_aoi = json.loads(AOI_IN.read_text())
-    fc_eval = json.loads(EVAL_IN.read_text())
+    fc_aoi = json.loads(AOI_WGS84.read_text())
+    fc_eval = json.loads(EVAL_WGS84.read_text())
 
     out_aoi, area_m2, bbox_proj = reproject_aoi(fc_aoi)
     out_eval = reproject_eval(fc_eval)
     err, n_vert, n_pts = max_round_trip(fc_aoi, fc_eval)
     bbox_wgs = aoi_bbox_wgs84(fc_aoi)
 
-    AOI_OUT.write_text(json.dumps(out_aoi, indent=2) + "\n")
-    EVAL_OUT.write_text(json.dumps(out_eval, indent=2) + "\n")
+    AOI_26916.parent.mkdir(parents=True, exist_ok=True)
+    EVAL_26916.parent.mkdir(parents=True, exist_ok=True)
+    AOI_26916.write_text(json.dumps(out_aoi, indent=2) + "\n")
+    EVAL_26916.write_text(json.dumps(out_eval, indent=2) + "\n")
 
     print(write_report(bbox_wgs, bbox_proj, area_m2, err, n_vert, n_pts))
 

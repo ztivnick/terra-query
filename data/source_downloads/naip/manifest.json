@@ -1,0 +1,141 @@
+{
+  "generated_at": "2026-05-20T16:19:52.570797+00:00",
+  "stac_endpoint": "https://planetarycomputer.microsoft.com/api/stac/v1",
+  "collection": "naip",
+  "picked_years": [
+    "2012",
+    "2014",
+    "2016",
+    "2018",
+    "2020",
+    "2022"
+  ],
+  "cycles": [
+    {
+      "year": "2012",
+      "items": [
+        {
+          "item_id": "mi_m_4608939_se_16_1_20120720_20120904",
+          "datetime": "2012-07-20T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2012/mi_100cm_2012/46089/m_4608939_se_16_1_20120720.tif"
+          },
+          "fetched_at": "2026-05-20T04:27:33.308520+00:00"
+        },
+        {
+          "item_id": "mi_m_4608940_sw_16_1_20120720_20120904",
+          "datetime": "2012-07-20T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2012/mi_100cm_2012/46089/m_4608940_sw_16_1_20120720.tif"
+          },
+          "fetched_at": "2026-05-20T04:27:33.308520+00:00"
+        }
+      ]
+    },
+    {
+      "year": "2014",
+      "items": [
+        {
+          "item_id": "mi_m_4608939_se_16_1_20141006_20141113",
+          "datetime": "2014-10-06T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2014/mi_100cm_2014/46089/m_4608939_se_16_1_20141006.tif"
+          },
+          "fetched_at": "2026-05-20T04:29:49.226069+00:00"
+        },
+        {
+          "item_id": "mi_m_4608940_sw_16_1_20140906_20141113",
+          "datetime": "2014-09-06T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2014/mi_100cm_2014/46089/m_4608940_sw_16_1_20140906.tif"
+          },
+          "fetched_at": "2026-05-20T04:29:49.226069+00:00"
+        }
+      ]
+    },
+    {
+      "year": "2016",
+      "items": [
+        {
+          "item_id": "mi_m_4608939_se_16_h_20160731",
+          "datetime": "2016-07-31T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2016/mi_060cm_2016/46089/m_4608939_se_16_h_20160731.tif"
+          },
+          "fetched_at": "2026-05-20T04:37:32.441250+00:00"
+        },
+        {
+          "item_id": "mi_m_4608940_sw_16_h_20160731",
+          "datetime": "2016-07-31T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2016/mi_060cm_2016/46089/m_4608940_sw_16_h_20160731.tif"
+          },
+          "fetched_at": "2026-05-20T04:37:32.441250+00:00"
+        }
+      ]
+    },
+    {
+      "year": "2018",
+      "items": [
+        {
+          "item_id": "mi_m_4608939_se_16_060_20180730_20190316",
+          "datetime": "2018-07-30T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2018/mi_060cm_2018/46089/m_4608939_se_16_060_20180730.tif"
+          },
+          "fetched_at": "2026-05-20T04:42:53.666523+00:00"
+        },
+        {
+          "item_id": "mi_m_4608940_sw_16_060_20180730_20190316",
+          "datetime": "2018-07-30T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2018/mi_060cm_2018/46089/m_4608940_sw_16_060_20180730.tif"
+          },
+          "fetched_at": "2026-05-20T04:42:53.666523+00:00"
+        }
+      ]
+    },
+    {
+      "year": "2020",
+      "items": [
+        {
+          "item_id": "mi_m_4608939_se_16_060_20200801",
+          "datetime": "2020-08-01T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2020/mi_060cm_2020/46089/m_4608939_se_16_060_20200801.tif"
+          },
+          "fetched_at": "2026-05-20T04:47:34.216395+00:00"
+        },
+        {
+          "item_id": "mi_m_4608940_sw_16_060_20200801",
+          "datetime": "2020-08-01T00:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2020/mi_060cm_2020/46089/m_4608940_sw_16_060_20200801.tif"
+          },
+          "fetched_at": "2026-05-20T04:47:34.216395+00:00"
+        }
+      ]
+    },
+    {
+      "year": "2022",
+      "items": [
+        {
+          "item_id": "mi_m_4608939_se_16_060_20220905",
+          "datetime": "2022-09-05T16:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2022/mi_060cm_2022/46089/m_4608939_se_16_060_20220905.tif"
+          },
+          "fetched_at": "2026-05-20T04:20:54.283999+00:00"
+        },
+        {
+          "item_id": "mi_m_4608940_sw_16_060_20220905",
+          "datetime": "2022-09-05T16:00:00+00:00",
+          "assets": {
+            "image": "https://naipeuwest.blob.core.windows.net/naip/v002/mi/2022/mi_060cm_2022/46089/m_4608940_sw_16_060_20220905.tif"
+          },
+          "fetched_at": "2026-05-20T04:20:54.283999+00:00"
+        }
+      ]
+    }
+  ]
+}

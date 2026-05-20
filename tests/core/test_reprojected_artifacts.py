@@ -1,13 +1,9 @@
 import json
-from pathlib import Path
 
 import pytest
 from shapely.geometry import Point, Polygon
 
-REPO = Path(__file__).resolve().parent.parent
-AOI_PROJ = REPO / "data" / "aoi" / "bond_falls_block_26916.geojson"
-EVAL_PROJ = REPO / "data" / "eval" / "known_features_26916.geojson"
-REPORT = REPO / "data" / "crs_verification.txt"
+from terra_query.core.paths import AOI_26916, CRS_VERIFICATION, EVAL_26916
 
 
 def _declared_epsg(fc: dict) -> int:
@@ -16,12 +12,12 @@ def _declared_epsg(fc: dict) -> int:
 
 @pytest.fixture(scope="module")
 def aoi_proj() -> dict:
-    return json.loads(AOI_PROJ.read_text())
+    return json.loads(AOI_26916.read_text())
 
 
 @pytest.fixture(scope="module")
 def eval_proj() -> dict:
-    return json.loads(EVAL_PROJ.read_text())
+    return json.loads(EVAL_26916.read_text())
 
 
 def test_aoi_projected_artifact_shape(aoi_proj):
@@ -55,6 +51,6 @@ def test_all_eval_points_inside_reprojected_aoi(aoi_proj, eval_proj):
 
 
 def test_verification_report_contents():
-    text = REPORT.read_text()
+    text = CRS_VERIFICATION.read_text()
     for needle in ("EPSG:26916", "Area of use", "AOI area", "Round-trip", "tolerance 1e-7"):
         assert needle in text, f"missing from report: {needle!r}"

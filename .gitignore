@@ -1,60 +1,122 @@
-# secrets
+# =============================================================================
+# secrets / credentials  --  never commit
+# =============================================================================
 .env
 .env.*
 !.env.example
 *.pem
 *.key
+*.crt
+*.p12
+*.pfx
 
-# logs
+# =============================================================================
+# logs and temp / scratch files
+# =============================================================================
 *.log
+*.tmp
+*.bak
+*.orig
+*~
 
+# =============================================================================
+# operating system junk
+# =============================================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+desktop.ini
+
+# =============================================================================
+# editors / IDEs
+# =============================================================================
+.vscode/
+.idea/
+.history/
+*.swp
+*.swo
+*.code-workspace
+
+# =============================================================================
 # python
+# regen: `uv sync`
+# =============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+.eggs/
+build/
 .venv/
 venv/
 env/
+.python-version
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pyre/
+.pytype/
+.dmypy.json
+dmypy.json
+.tox/
+.nox/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
-*.egg-info/
 
-# node / frontend
+# notebooks - strip outputs but ignore checkpoints
+.ipynb_checkpoints/
+
+# =============================================================================
+# node / frontend (frontend/ is the slot; tooling TBD)
+# regen: `npm install` (or pnpm / bun, whichever the frontend uses)
+# =============================================================================
 node_modules/
 dist/
+out/
 .next/
+.nuxt/
+.svelte-kit/
 .turbo/
+.cache/
+.parcel-cache/
 *.tsbuildinfo
 
-# bulk data and weights (NEVER commit)
+# =============================================================================
+# bulk raster / geo formats  --  never commit; ingest CLIs re-download
+# regen: `uv run python -m terra_query.ingest.cli.fetch_naip`
+#        `uv run python -m terra_query.ingest.cli.fetch_sentinel2`
+#        (plus future LiDAR / OSM fetchers as those steps land)
+# =============================================================================
 *.tif
 *.tiff
 *.las
 *.laz
 *.copc
 *.gpkg
-*.gguf
-*.bin
-*.safetensors
-*.pt
-*.sqlite3
-*.dump
-
-# more bulk binary geo formats (downloaded raw data; regenerable)
 *.pbf
 *.fgb
 *.kmz
+
+# shapefile bundle (5 sibling files form one shapefile; rare to track)
 *.shp
 *.shx
 *.dbf
 *.prj
 *.cpg
 
-# derived arrays and indices (embeddings, vector stores; regenerable)
+# raster sidecars (GDAL stats / overviews / world files; regen on open)
+*.aux.xml
+*.ovr
+*.tfw
+*.wld
+
+# =============================================================================
+# derived arrays / vector stores / indices  --  never commit; regen by pipeline
+# regen: the pipeline step that produces each (S5 embeddings, S6 vector store)
+# =============================================================================
 *.npy
 *.npz
 *.parquet
@@ -62,37 +124,67 @@ dist/
 *.arrow
 *.h5
 *.hdf5
-*.faiss
-
-# raster sidecars (GDAL stats / overviews / world files; regenerated on open)
-*.aux.xml
-*.ovr
-*.tfw
-*.wld
-
-# zarr (directory-shaped binary)
 *.zarr/
+*.faiss
+*.lance
+*.duckdb
+*.sqlite
+*.sqlite3
+*.dump
 
-# notebooks - strip outputs but ignore checkpoints
-.ipynb_checkpoints/
+# =============================================================================
+# verification PNGs  --  regenerable visual artifacts; not source-of-truth
+# regen: `uv run python -m terra_query.eval.review`
+#        `uv run python -m terra_query.eval.gate_visuals`
+# =============================================================================
+data/verification/eval_chips/*.png
+data/verification/gate/*.png
 
-# macos
-.DS_Store
+# =============================================================================
+# ML model weights / checkpoints  --  never commit; refetch from HF / source
+# regen: model-download step (lands at S5); cached under
+#        data/source_downloads/model_weights/
+# =============================================================================
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.gguf
+*.tflite
+*.pkl
+*.joblib
 
-# editors
-.vscode/
-.idea/
-*.swp
-*.swo
+# =============================================================================
+# compressed archives (typically bulk downloads)
+# =============================================================================
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.tar.bz2
+*.tbz2
+*.tar.xz
+*.txz
+*.gz
+*.bz2
+*.xz
 
-# cline state
+# =============================================================================
+# AI collaborator artifacts  --  kept local only by convention
+# Not synced to the remote; share out of band if you need them on another
+# machine. Treat README.md and data/README.md as the canonical onboarding;
+# the contents of docs/ are an internal working layer for the AI session.
+# =============================================================================
 .cline/
-
-# ai pipeline (per your preference: kept local only)
 .clinerules/
 .clineignore
+.claude/
+.cursor/
+.aider*
+.continue/
 docs/
 implementation_plan.md
 CLAUDE.md
 CLAUDE.local.md
-.claude/

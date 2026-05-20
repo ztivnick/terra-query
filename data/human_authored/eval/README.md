@@ -48,7 +48,8 @@ Each feature is a Point in WGS84 with these `properties`:
 | `type` | yes | enum | feature kind, see enum below |
 | `category` | yes | enum | `positive_in_scope`, `negative_mapped`, `out_of_scope` |
 | `source` | yes | string | where the coordinate came from (e.g. `osm_way:615053222 (polygon centroid)`, `osm_node:1587709054`) |
-| `findable_aerial` | yes | bool \| null | set during S1 build step 4; null if not yet checked |
+| `findable_aerial` | yes | bool \| null | re-set at S3 against the project's own NAIP raster (was eye-checked against free public aerial at S1); see `findable_aerial_source` for cycle |
+| `findable_aerial_source` | yes | string | which NAIP cycle the flag was set against, e.g. `naip_2022` |
 | `findable_lidar` | yes | bool \| null | left null at S1; updated when LiDAR renders exist (S8) |
 | `notes` | yes | string | optional content, but the field is always present |
 | `provenance` | no | string | exact URL or dataset version for reproducibility; required for auxiliary additions (HTMC/MRDS/GNIS), optional otherwise |
@@ -125,11 +126,11 @@ These matter when interpreting future N7 results.
    N5 anti-join at S11 will filter it out of pipeline output. It
    survives as an N7-scoring positive (does the model retrieve a
    real cemetery when queried?), not as an end-product feature.
-5. **`findable_aerial` is null on every feature** until S1 step 4
-   runs. The values get set there by eye-check against a free public
-   aerial layer. Only positives with `findable_aerial=true` count
-   toward the gate's "at least 3 positives findable from aerial"
-   threshold.
+5. **`findable_aerial`** is set against `naip_2022` as of S3 (see
+   `findable_aerial_source` and the dedicated S3 section below). Only
+   positives with `findable_aerial=true` count toward the gate's
+   "at least 3 positives findable from aerial" threshold; currently
+   5 of 7 positives are TRUE so the gate clears.
 6. **`findable_lidar` is null on every feature**. It gets set at S8
    when LiDAR renders exist.
 
@@ -157,6 +158,47 @@ S1; outcome was:
   same crude georeferencing error applies. Net HTMC additions to
   this eval set: 0. Revisit HTMC enrichment only after S2 (working
   CRS pinned) using rasterio + pyproj for proper reprojection.
+
+## NAIP re-verification at S3 (supersedes the S1 web-aerial eye-check)
+
+S1 set `findable_aerial` by inspecting each coordinate on free public
+web aerial layers (the National Map / Google satellite mosaic). At
+S3 / N2 the project pulled actual NAIP imagery into the working CRS
+and the flag was re-verified against that raster (latest cycle:
+`naip_2022`, 0.6 m native, leaf-on summer). The new
+`findable_aerial_source` field records the cycle used.
+
+Outcome of the S3 re-verification:
+
+- 5 of 7 `positive_in_scope` features findable on the real NAIP
+  (same five as S1: `bond-falls`, `upper-bond-falls`,
+  `unnamed-pond-w-of-falls`, `unnamed-pond-s-of-falls`,
+  `unnamed-pond-e-of-flowage`). Gate threshold is 3; we clear.
+- 4 of 4 `negative_mapped` features visible on the NAIP, so the
+  N5 anti-join at S11 has real infrastructure to filter.
+- The dam-on-dam overlay check that S2 deferred to S3 passes:
+  `bond-falls-main-dam` sits on visible dam structure in the NAIP.
+
+The two positives that come back FALSE:
+
+- `unnamed-wetland-w-of-falls` - wetland blends with summer leaf-on
+  forest canopy at 0.6 m. The OSM polygon centroid lands in mottled
+  vegetation that does not read as a discrete wetland. The
+  Sentinel-2 leaf-off winter passes ingested alongside NAIP at S3
+  (`data/source_downloads/sentinel2/`) may surface this at S5/N7.
+- `barclay-cemetery` - the cemetery is small (~11-14 graves); at
+  0.6 m the markers are sub-pixel and the grassy clearing is
+  borderline distinguishable from surrounding canopy gaps.
+
+Per-feature 200 m x 200 m NAIP chips with a red crosshair on the
+exact coordinate are at `data/verification/eval_chips/<id>.png`. An
+AOI-wide overlay (AOI polygon + all eval points labeled by id) is
+at `data/verification/gate/overlay_check.png`.
+
+S3 also ingested NAIP cycles 2012, 2014, 2016, 2018, 2020 in
+addition to the 2022 reference cycle, and two Sentinel-2 winter
+scenes (2025-03-03, 2026-01-12). Cross-cycle and leaf-off
+inspection lives at the gate, not in this file.
 
 ## Demo-success definition (anchors later gates)
 

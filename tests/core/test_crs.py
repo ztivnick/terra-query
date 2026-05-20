@@ -1,11 +1,10 @@
 import json
-from pathlib import Path
 
 import pytest
 from pyproj import Geod
 from shapely.geometry import Polygon
 
-from terra_query.crs import (
+from terra_query.core.crs import (
     WORKING_CRS_EPSG,
     area_of_use_bounds,
     area_of_use_covers,
@@ -14,20 +13,17 @@ from terra_query.crs import (
     to_working,
     working_crs,
 )
-
-REPO = Path(__file__).resolve().parent.parent
-AOI_PATH = REPO / "data" / "aoi" / "bond_falls_block.geojson"
-EVAL_PATH = REPO / "data" / "eval" / "known_features.geojson"
+from terra_query.core.paths import AOI_WGS84, EVAL_WGS84
 
 
 @pytest.fixture(scope="module")
 def aoi():
-    return json.loads(AOI_PATH.read_text())
+    return json.loads(AOI_WGS84.read_text())
 
 
 @pytest.fixture(scope="module")
 def eval_fc():
-    return json.loads(EVAL_PATH.read_text())
+    return json.loads(EVAL_WGS84.read_text())
 
 
 def _aoi_rings(aoi):

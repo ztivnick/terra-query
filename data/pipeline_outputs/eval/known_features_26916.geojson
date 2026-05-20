@@ -18,7 +18,8 @@
         "source": "osm_node:1587709054 (cross-checked Wikipedia, World Waterfall Database)",
         "findable_aerial": true,
         "findable_lidar": null,
-        "notes": "marquee anchor on Middle Branch Ontonagon River. mapped in OSM; serves as the primary 'can text retrieve waterfall?' anchor at the N7 gate, not as an 'unmapped' test."
+        "notes": "marquee anchor on Middle Branch Ontonagon River. mapped in OSM; serves as the primary 'can text retrieve waterfall?' anchor at the N7 gate, not as an 'unmapped' test.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -38,7 +39,8 @@
         "source": "osm_node:8794922221",
         "findable_aerial": true,
         "findable_lidar": null,
-        "notes": "secondary cascade upstream of Bond Falls. mapped in OSM."
+        "notes": "secondary cascade upstream of Bond Falls. mapped in OSM.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -58,7 +60,8 @@
         "source": "osm_way:34465775 (polygon centroid)",
         "findable_aerial": true,
         "findable_lidar": null,
-        "notes": "small unnamed water body. mapped in OSM but unnamed; valid test target for 'small pond in forest' retrieval."
+        "notes": "small unnamed water body. mapped in OSM but unnamed; valid test target for 'small pond in forest' retrieval.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -78,7 +81,8 @@
         "source": "osm_way:34464179 (polygon centroid)",
         "findable_aerial": true,
         "findable_lidar": null,
-        "notes": "unnamed water body along Roselawn Creek."
+        "notes": "unnamed water body along Roselawn Creek.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -98,7 +102,8 @@
         "source": "osm_way:34602431 (polygon centroid)",
         "findable_aerial": false,
         "findable_lidar": null,
-        "notes": "wetland tagged in OSM; plausible beaver complex. type bucketed under beaver_kettle_pond since the schema does not have a separate wetland type."
+        "notes": "wetland tagged in OSM; plausible beaver complex. type bucketed under beaver_kettle_pond since the schema does not have a separate wetland type.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -118,7 +123,8 @@
         "source": "osm_way:34598256 (polygon centroid)",
         "findable_aerial": true,
         "findable_lidar": null,
-        "notes": "small unnamed water body east of the dam, north-east quadrant of the AOI."
+        "notes": "small unnamed water body east of the dam, north-east quadrant of the AOI.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -138,7 +144,8 @@
         "source": "osm_way:950017907 (polygon centroid)",
         "findable_aerial": true,
         "findable_lidar": null,
-        "notes": "N5 must filter this out. structure between the flowage (south) and the falls (north)."
+        "notes": "N5 must filter this out. structure between the flowage (south) and the falls (north).",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -158,7 +165,8 @@
         "source": "osm_way:970628538 (polygon centroid)",
         "findable_aerial": true,
         "findable_lidar": null,
-        "notes": "main visitor parking south of the falls viewing area. N5 must filter."
+        "notes": "main visitor parking south of the falls viewing area. N5 must filter.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -178,7 +186,8 @@
         "source": "osm_way:970628537 (polygon centroid)",
         "findable_aerial": true,
         "findable_lidar": null,
-        "notes": "representative footway in the boardwalk/viewing complex. the real complex is many connected footways and steps around 46.4088-46.4093, -89.132 to -89.131."
+        "notes": "representative footway in the boardwalk/viewing complex. the real complex is many connected footways and steps around 46.4088-46.4093, -89.132 to -89.131.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -198,7 +207,8 @@
         "source": "osm_way:950017898 (polyline centroid)",
         "findable_aerial": true,
         "findable_lidar": null,
-        "notes": "Bond Falls Road segment near the dam/falls complex. N5 must filter."
+        "notes": "Bond Falls Road segment near the dam/falls complex. N5 must filter.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",
@@ -219,7 +229,8 @@
         "provenance": "https://www.openstreetmap.org/way/615053222 - landuse=cemetery, name=Barclay Cemetery, gnis:feature_id=1622554, ele=446",
         "findable_aerial": false,
         "findable_lidar": null,
-        "notes": "Small historic cemetery in Haight Township Section 12 owned/maintained by Upper Peninsula Power Company (~11-14 graves per USGenWeb + Find a Grave records). Coordinate is the OSM polygon centroid, authoritative to ~5 m. Mapped in OSM with landuse=cemetery, so the N5 anti-join at S11 will filter it out of pipeline output; included here as an N7 retrieval-scoring positive (does the model rank a real cemetery feature when queried with 'cemetery' or 'graveyard'?), not as an end-product test. AOI was expanded from 4 x 4 km to 5 x 5 km specifically to include this point with 450 m buffer south of the AOI south edge."
+        "notes": "Small historic cemetery in Haight Township Section 12 owned/maintained by Upper Peninsula Power Company (~11-14 graves per USGenWeb + Find a Grave records). Coordinate is the OSM polygon centroid, authoritative to ~5 m. Mapped in OSM with landuse=cemetery, so the N5 anti-join at S11 will filter it out of pipeline output; included here as an N7 retrieval-scoring positive (does the model rank a real cemetery feature when queried with 'cemetery' or 'graveyard'?), not as an end-product test. AOI was expanded from 4 x 4 km to 5 x 5 km specifically to include this point with 450 m buffer south of the AOI south edge.",
+        "findable_aerial_source": "naip_2022"
       },
       "geometry": {
         "type": "Point",

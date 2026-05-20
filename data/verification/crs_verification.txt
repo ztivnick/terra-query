@@ -15,5 +15,5 @@ Round-trip 4326 -> 26916 -> 4326 across 5 AOI vertices + 11 eval points:
 Max coordinate error        : 7.11e-15 deg (tolerance 1e-7)
 
 Artifacts:
-- data/aoi/bond_falls_block_26916.geojson
-- data/eval/known_features_26916.geojson
+- data/pipeline_outputs/aoi/bond_falls_block_26916.geojson
+- data/pipeline_outputs/eval/known_features_26916.geojson
