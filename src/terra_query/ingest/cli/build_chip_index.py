@@ -1,4 +1,4 @@
-"""CLI: build the S4 chip index, eval-chip PNGs, and grid-overview PNG.
+"""CLI: build the NAIP chip index, eval-chip PNGs, and grid-overview PNG.
 
 Idempotent: each output gets regenerated only if it is missing or older than
 its inputs. Re-run safely after a NAIP refresh, an eval-set edit, or a code
@@ -25,7 +25,6 @@ from terra_query.core.paths import (
 from terra_query.ingest.chips import (
     ChipBox,
     assemble_chip_index,
-    build_chip_grid,
     render_chip_grid_overview,
     render_eval_chip_png,
 )
@@ -160,7 +159,7 @@ def render_overview(idx: dict, force: bool = False) -> None:
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Build S4 chip index + verification PNGs.")
+    parser = argparse.ArgumentParser(description="Build the chip index + verification PNGs.")
     parser.add_argument("--force", action="store_true", help="Regenerate every artifact.")
     args = parser.parse_args()
 

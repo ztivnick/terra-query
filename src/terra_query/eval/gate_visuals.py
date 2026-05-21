@@ -1,4 +1,4 @@
-"""S3 gate verification visuals.
+"""Aerial-ingest gate verification visuals.
 
 Renders artifacts that prove the gate's manual-check items without QGIS:
   1. Side-by-side cross-cycle NAIP comparison (oldest vs latest) at the
@@ -6,7 +6,7 @@ Renders artifacts that prove the gate's manual-check items without QGIS:
   2. Sentinel-2 winter RGB (B04/B03/B02) at the full AOI extent, one
      PNG per scene.
   3. NAIP RGB at the Bond Falls dam area with the dam eval point
-     marked - reproof of the S2-deferred dam-on-dam check on the actual
+     marked - proof of the dam-on-dam coordinate check on the actual
      mosaicked raster (not just a chip crop).
 
     uv run python -m terra_query.eval.gate_visuals

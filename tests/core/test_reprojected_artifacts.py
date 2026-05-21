@@ -36,10 +36,15 @@ def test_aoi_projected_artifact_shape(aoi_proj):
 def test_eval_projected_artifact_shape(eval_proj):
     assert eval_proj["type"] == "FeatureCollection"
     assert _declared_epsg(eval_proj) == 26916
-    assert len(eval_proj["features"]) == 11
+    # 12 features: 11 OSM-derived + small-cabin-ne-aoi (mvp_required, the
+    # LiDAR-must-find criterion).
+    assert len(eval_proj["features"]) == 12
     for f in eval_proj["features"]:
         assert f["geometry"]["type"] == "Point"
         assert "id" in f["properties"]
+    # the cabin must be present
+    ids = {f["properties"]["id"] for f in eval_proj["features"]}
+    assert "small-cabin-ne-aoi" in ids
 
 
 def test_all_eval_points_inside_reprojected_aoi(aoi_proj, eval_proj):

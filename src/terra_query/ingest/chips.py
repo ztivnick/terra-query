@@ -1,12 +1,12 @@
-"""Chip grid for the buffered Bond Falls AOI (S4 / N6, NAIP-only).
+"""Chip grid for the buffered AOI (NAIP-only).
 
 A "chip" here is a 224 m x 224 m square in EPSG:26916. The grid is the
 same in 26916 across every NAIP cycle; only the source pixel array
 behind each chip differs (1.0 m native for 2012/2014, 0.6 m native for
 2016+). The chip is defined by its bbox: pixel-level reads happen via
 windowed reads against the source COG at the cycle's native resolution,
-not at chip-cut time. The model's preprocessor at S5 resamples the
-native array to its input size.
+not at chip-cut time. The downstream image model's preprocessor
+resamples the native array to its input size.
 
 50% overlap (stride = 112 m) so a small feature near a chip boundary in
 one chip is well inside an adjacent chip. Standard RS-retrieval default.
@@ -99,9 +99,8 @@ def build_chip_grid(
     50% overlap (stride = chip_size_m / 2): adjacent chips share half their area,
     so any interior point sits in up to 4 chips. Grid origin snaps to the largest
     multiple of stride <= (AOI_west, AOI_south), and dims size up to cover the
-    AOI east/north edges. Chips at the AOI boundary extend into the S3 buffer
-    band; the buffer's 250 m gives plenty of room before the chip would cross
-    the COG edge.
+    AOI east/north edges. Chips at the AOI boundary extend into the COG's buffer
+    band (250 m around the AOI), so chips never cross the COG edge.
     """
     ow, os = grid_origin(aoi_bounds_26916, stride_m)
     n_rows, n_cols = grid_dims(aoi_bounds_26916, chip_size_m, stride_m)
@@ -146,7 +145,7 @@ def primary_containing_chip(
 
 
 def _native_pixel_size_from_cog(cog_path: Path) -> float:
-    """Read pixel size off the COG's transform. Trust the file, not the plan."""
+    """Read pixel size off the COG's transform (trust the file)."""
     import rasterio
 
     with rasterio.open(cog_path) as ds:
@@ -177,8 +176,7 @@ def assemble_chip_index(
     `aoi_polygon_26916` is a shapely Polygon in 26916. `eval_points_26916` is
     a list of (feature_id, (easting, northing)). `naip_cycle_cogs` is a list
     of (year, cog_path); pixel size per cycle is read from the COG transform
-    so the index reflects what is actually on disk, not what the S3 plan
-    claimed.
+    so the index reflects what is actually on disk.
 
     Returns the index dict; caller writes it to disk.
     """
@@ -266,8 +264,8 @@ def read_chip(
 
     Returns a numpy array of shape (n_bands, native_h, native_w), uint8.
     No resampling: the array is the source cycle's native pixels clipped
-    to the chip bbox. S5's model preprocessor handles the resize to the
-    model's input size.
+    to the chip bbox. The downstream image model's preprocessor handles
+    the resize to the model's input size.
 
     `bands` is 1-indexed (rasterio convention): (1,2,3)=RGB, (4,1,2)=CIR
     (NIR-R-G), (1,2,3,4)=4-band. Any subset of {1,2,3,4} works.

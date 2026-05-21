@@ -5,9 +5,8 @@ Natural-language retrieval of unmapped features in public forest. Type
 semantic similarity, not by what's already in OSM.
 
 Status: MVP / POC. Current target area is the Bond Falls block of
-Ottawa National Forest (~25 km^2). Strategy and per-step plans live in
-`docs/architecture_plans/` (kept local by convention, see "What is and
-isn't in this clone" below).
+Ottawa National Forest (~25 km^2). Production scaling target is ~500 km^2
+(Bond Falls + adjacent watersheds).
 
 ## Layout
 
@@ -32,8 +31,10 @@ imports from the project root.
 # 1. install / update Python deps (lockfile-driven; reproducible)
 uv sync
 
-# 2. verify the install
-uv run pytest -q          # 19/19 expected after S3
+# 2. run the tests. Tests that depend on bulk data (NAIP COGs, model
+#    weights, embeddings) skip cleanly with a hint pointing at the CLI
+#    that produces the missing artifact.
+uv run pytest -q
 ```
 
 Now you have a working clone of all *code* and *small ground-truth /
@@ -63,17 +64,68 @@ uv run python -m terra_query.ingest.cli.fetch_sentinel2
 # Render the per-eval-feature NAIP chips + AOI overlay PNG.
 uv run python -m terra_query.eval.review
 
-# Render the gate verification visuals.
+# Render the aerial-ingest gate verification visuals.
 uv run python -m terra_query.eval.gate_visuals
+
+# Cut the chip grid for every NAIP cycle (writes chip_index.json).
+uv run python -m terra_query.ingest.cli.build_chip_index
+
+# Fetch the production model weights (~1.6 GB) into model_weights/.
+uv run python -m terra_query.embed.cli.fetch_weights
+
+# Embed every chip with the production model across all 6 cycles
+# (~6 .npy files; ~6.5 MB each; one overnight run from cold start).
+uv run python -m terra_query.embed.cli.embed_chips
+
+# Run the retrieval gate and write the verdict report + thumbnails.
+uv run python -m terra_query.eval.cli.run_n0_retrieval
 ```
 
 Every fetch CLI is idempotent: rerunning skips already-valid outputs
 and just refreshes manifest metadata. First NAIP fetch is the only
 slow step (~10 min/cycle on a residential connection, six cycles).
 
-Later pipeline steps (S4 chip cutting, S5 embeddings, S6 vector store,
-S7 query path + UI, S8 LiDAR, ...) land their own ingest / regen
-commands; each will be documented at its own step.
+## Production model (aerial branch)
+
+Locked to **GeoRSCLIP ViT-L/14-336** on RGB. Single source of truth:
+the `PRODUCTION_MODEL_ID` constant in
+[src/terra_query/embed/models.py](src/terra_query/embed/models.py). Every
+CLI and every test fixture reads from there.
+
+LiDAR / sub-canopy detection is a separate modality and will register
+its own model when that branch of the pipeline is built.
+
+### Swapping the production model
+
+The whole pipeline reads `embed.models.PRODUCTION_MODEL_ID`. To swap:
+
+```bash
+# 1. register the candidate in src/terra_query/embed/models.py:
+#    add a ModelSpec entry to MODELS{} for the new id.
+
+# 2. (optional) validate the candidate against the gate before locking it in:
+uv run python -m terra_query.embed.cli.fetch_weights --models <candidate-id>
+uv run python -m terra_query.embed.cli.embed_chips --models <candidate-id>
+uv run python -m terra_query.eval.cli.run_n0_retrieval \
+    --configs <candidate-id>__rgb
+
+# 3. point production at the candidate:
+#    edit PRODUCTION_MODEL_ID in src/terra_query/embed/models.py.
+
+# 4. purge the now-stale artifacts of the old production model:
+rm -rf data/source_downloads/model_weights/<old-id>
+rm data/pipeline_outputs/embeddings/<old-id>__*.npy \
+   data/pipeline_outputs/embeddings/<old-id>__*.json
+rm -rf data/verification/gate/topk_chips/*<old-id>*
+#    (also drop the old MODELS entry from models.py if you're done with it)
+
+# 5. regenerate the gate + thumbnails with the new production model:
+uv run python -m terra_query.eval.cli.run_n0_retrieval
+```
+
+This is a manual procedure today. A future orchestrator step will
+replace it with a single `terra-query run` command that walks the
+dependency graph and purges stale artifacts automatically.
 
 ## What isn't git tracked
 

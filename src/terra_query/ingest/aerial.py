@@ -1,12 +1,9 @@
-"""Aerial-imagery ingest for the Bond Falls AOI.
+"""Aerial-imagery ingest for the AOI.
 
-S3 / N2. Pulls NAIP (4-band, primary) and Sentinel-2 L2A winter scenes
-(leaf-off context) from the Microsoft Planetary Computer STAC. Outputs
-reprojected, mosaicked, AOI-clipped COGs in EPSG:26916, plus per-source
-manifest sidecars.
-
-LiDAR is S8, Sentinel-1 SAR is deferred. Chip cutting is S4. Nothing
-here knows about embeddings.
+Pulls NAIP (4-band, primary) and Sentinel-2 L2A winter scenes (leaf-off
+context) from the Microsoft Planetary Computer STAC. Outputs reprojected,
+mosaicked, AOI-clipped COGs in EPSG:26916, plus per-source manifest
+sidecars. LiDAR and SAR are out of scope for this module.
 
 This module hosts the reusable pieces. CLI entry points live in
 `terra_query.ingest.cli.fetch_naip` and `terra_query.ingest.cli.fetch_sentinel2`.
@@ -17,7 +14,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 PC_STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 NAIP_COLLECTION = "naip"

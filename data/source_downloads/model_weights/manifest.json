@@ -1,0 +1,18 @@
+{
+  "models": {
+    "georsclip-vit-l-14-336": {
+      "arch": "ViT-L-14-336",
+      "embed_dim": 768,
+      "fetched_at": "2026-05-21T15:51:01.481647+00:00",
+      "file_size_bytes": 1711947530,
+      "hf_filename": "ckpt/RS5M_ViT-L-14-336.pt",
+      "hf_repo": "Zilun/GeoRSCLIP",
+      "image_size": 336,
+      "model_id": "georsclip-vit-l-14-336",
+      "sha256": "b0c2c660e917a7235f7aec346556d2696cbf419249cf75bcd8c17b822b76428c",
+      "source": "huggingface",
+      "verified_load_device": "mps",
+      "weights_path": "/Users/nick/Documents/terra-query/data/source_downloads/model_weights/georsclip-vit-l-14-336/ckpt/RS5M_ViT-L-14-336.pt"
+    }
+  }
+}

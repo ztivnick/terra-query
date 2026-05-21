@@ -1,4 +1,4 @@
-"""S3 step 6: re-verify findable_aerial against the real NAIP.
+"""Re-verify `findable_aerial` per eval feature against the real NAIP.
 
 Renders one 200 m x 200 m NAIP RGB chip per eval feature centered on the
 feature with a crosshair marker, plus an AOI-wide overlay PNG with the

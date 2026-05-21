@@ -1,4 +1,4 @@
-"""Reproject S1 vector artifacts into the working CRS and write a verification report.
+"""Reproject the human-authored AOI + eval set into the working CRS.
 
 Reads the AOI + eval set from `human_authored/`, writes their 26916
 counterparts to `pipeline_outputs/`, and a verification report to
@@ -125,8 +125,8 @@ def write_report(
     n_pts: int,
 ) -> str:
     aou = area_of_use_bounds()
-    s1_area_km2 = 25.0
-    rel = abs(area_m2 / 1e6 - s1_area_km2) / s1_area_km2
+    aoi_target_area_km2 = 25.0  # what the human-authored AOI was sized to
+    rel = abs(area_m2 / 1e6 - aoi_target_area_km2) / aoi_target_area_km2
     text = (
         "terra-query working CRS verification\n"
         "====================================\n"
@@ -139,7 +139,7 @@ def write_report(
         f"{aoi_bbox_proj[2]:.3f}, {aoi_bbox_proj[3]:.3f})\n"
         "\n"
         f"AOI area (26916)            : {area_m2:.3f} m^2 ({area_m2 / 1e6:.5f} km^2)\n"
-        f"AOI area (S1 haversine)     : {s1_area_km2} km^2\n"
+        f"AOI target (km^2)           : {aoi_target_area_km2}\n"
         f"Relative diff               : {rel:.4%}\n"
         "\n"
         f"Round-trip 4326 -> 26916 -> 4326 across {n_vert} AOI vertices "

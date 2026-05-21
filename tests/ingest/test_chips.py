@@ -1,4 +1,4 @@
-"""Tests for the S4 chip grid. Populated across BUILD steps 2-5."""
+"""Tests for the NAIP chip grid (pure-Python grid math + full-index assembly)."""
 
 from __future__ import annotations
 
@@ -142,12 +142,12 @@ def test_chip_box_bbox_and_center():
     assert chip.center == (333312.0, 5139008.0)
 
 
-# ---- step 3: chip index assembly ----------------------------------------
+# ---- chip index assembly -----------------------------------------------
 
 
 @pytest.fixture(scope="module")
 def real_chip_index() -> dict:
-    """Assemble the chip index from the real S2/S3 artifacts on disk."""
+    """Assemble the chip index from the real reprojected AOI / NAIP COGs on disk."""
     from shapely.geometry import shape
 
     aoi_gj = json.loads(AOI_26916.read_text())
@@ -247,7 +247,9 @@ def test_index_inside_aoi_flag(real_chip_index):
 
 def test_index_eval_lookup_has_six_chips_per_feature(real_chip_index):
     eval_lookup = real_chip_index["eval_lookup"]
-    assert len(eval_lookup) == 11
+    # 12 eval features: 11 OSM-derived + small-cabin-ne-aoi (mvp_required).
+    assert len(eval_lookup) == 12
+    assert "small-cabin-ne-aoi" in eval_lookup
     for fid, entries in eval_lookup.items():
         assert len(entries) == 6
         years = [e["year"] for e in entries]

@@ -1,4 +1,4 @@
-"""STAC discovery + cycle selection for S3 aerial ingest.
+"""STAC discovery + cycle selection for aerial ingest.
 
 Lists available NAIP cycles and Sentinel-2 winter scenes for the AOI,
 prints a summary, and writes per-source manifest files with the picks.

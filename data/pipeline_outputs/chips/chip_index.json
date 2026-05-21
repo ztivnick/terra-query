@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-20T17:57:08.801529+00:00",
+  "generated_at": "2026-05-21T16:48:36.853586+00:00",
   "working_crs": "EPSG:26916",
   "chip_size_m": 224,
   "stride_m": 112,
@@ -265471,6 +265471,32 @@
       {
         "year": "2022",
         "chip_id": "naip_2022_r005_c020"
+      }
+    ],
+    "small-cabin-ne-aoi": [
+      {
+        "year": "2012",
+        "chip_id": "naip_2012_r034_c028"
+      },
+      {
+        "year": "2014",
+        "chip_id": "naip_2014_r034_c028"
+      },
+      {
+        "year": "2016",
+        "chip_id": "naip_2016_r034_c028"
+      },
+      {
+        "year": "2018",
+        "chip_id": "naip_2018_r034_c028"
+      },
+      {
+        "year": "2020",
+        "chip_id": "naip_2020_r034_c028"
+      },
+      {
+        "year": "2022",
+        "chip_id": "naip_2022_r034_c028"
       }
     ]
   }

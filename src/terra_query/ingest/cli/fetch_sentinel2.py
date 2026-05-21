@@ -1,4 +1,4 @@
-"""CLI for the Sentinel-2 ingest step (S3 BUILD step 5).
+"""CLI: fetch the per-scene Sentinel-2 COGs picked by `discover_aerial`.
 
 Reads scene picks from the S2 manifest, fetches each (idempotent), and
 updates the manifest. Run as:

@@ -138,7 +138,9 @@ out/
 #        `uv run python -m terra_query.eval.gate_visuals`
 # =============================================================================
 data/verification/eval_chips/*.png
-data/verification/gate/*.png
+# recursive — gate topk chip thumbnails live under gate/topk_chips/<config>/ and
+# would otherwise slip past a non-recursive *.png glob.
+data/verification/gate/**/*.png
 
 # =============================================================================
 # ML model weights / checkpoints  --  never commit; refetch from HF / source

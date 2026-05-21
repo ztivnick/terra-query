@@ -2,8 +2,9 @@
 
 EPSG:26916 (NAD83 / UTM Zone 16N, meters) is the single projected
 frame for every raster and vector. Grid origin convention: pixel
-corners snap to integer-meter coordinates in 26916. Pixel size is
-set at S4/N6 once the embedding model's chip size is known.
+corners snap to integer-meter coordinates in 26916. Per-raster pixel
+size is read off each source COG; this module does not pin a pixel
+size.
 
 Coordinates here use (x, y) = (lon, lat) for WGS84 and (easting,
 northing) for the working CRS. All Transformers are built with

@@ -36,6 +36,7 @@ NAIP_MANIFEST = NAIP_DIR / "manifest.json"
 S2_DIR = SOURCE_DOWNLOADS / "sentinel2"
 S2_MANIFEST = S2_DIR / "manifest.json"
 MODEL_WEIGHTS_DIR = SOURCE_DOWNLOADS / "model_weights"
+MODEL_WEIGHTS_MANIFEST = MODEL_WEIGHTS_DIR / "manifest.json"
 
 # pipeline_outputs/
 AOI_26916 = PIPELINE_OUTPUTS / "aoi" / "bond_falls_block_26916.geojson"
@@ -43,6 +44,7 @@ EVAL_26916 = PIPELINE_OUTPUTS / "eval" / "known_features_26916.geojson"
 CHIPS_DIR = PIPELINE_OUTPUTS / "chips"
 CHIP_INDEX_JSON = CHIPS_DIR / "chip_index.json"
 CHIP_EVAL_DIR = CHIPS_DIR / "eval"
+EMBEDDINGS_DIR = PIPELINE_OUTPUTS / "embeddings"
 
 # verification/
 CRS_VERIFICATION = VERIFICATION / "crs_verification.txt"
@@ -51,6 +53,9 @@ GATE_DIR = VERIFICATION / "gate"
 OVERLAY_PNG = GATE_DIR / "overlay_check.png"
 CHIP_GRID_OVERVIEW_PNG = GATE_DIR / "chip_grid_overview.png"
 RUN_LOGS_DIR = VERIFICATION / "runs"
+N0_RESULTS_JSON = GATE_DIR / "n0_retrieval_results.json"
+N0_REPORT_MD = GATE_DIR / "n0_retrieval_report.md"
+TOPK_CHIPS_DIR = GATE_DIR / "topk_chips"
 
 
 def naip_cog(year: str) -> Path:
@@ -67,3 +72,19 @@ def eval_chip(feature_id: str) -> Path:
 
 def chip_eval(feature_id: str) -> Path:
     return CHIP_EVAL_DIR / f"{feature_id}.png"
+
+
+def model_weights_dir(model_id: str) -> Path:
+    return MODEL_WEIGHTS_DIR / model_id
+
+
+def embeddings_npy(model_id: str, bands: str, cycle: str) -> Path:
+    return EMBEDDINGS_DIR / f"{model_id}__{bands}__{cycle}.npy"
+
+
+def embeddings_json(model_id: str, bands: str, cycle: str) -> Path:
+    return EMBEDDINGS_DIR / f"{model_id}__{bands}__{cycle}.json"
+
+
+def topk_chip_dir(concept: str, model_id: str, bands: str) -> Path:
+    return TOPK_CHIPS_DIR / f"{concept}__{model_id}__{bands}"

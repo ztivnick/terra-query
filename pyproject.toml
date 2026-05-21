@@ -10,6 +10,10 @@ dependencies = [
     "pystac-client>=0.7",
     "planetary-computer>=1.0",
     "pillow>=10.0",
+    "numpy>=1.26",
+    "torch>=2.5",
+    "open-clip-torch>=2.24",
+    "huggingface-hub>=0.24",
 ]
 
 [dependency-groups]

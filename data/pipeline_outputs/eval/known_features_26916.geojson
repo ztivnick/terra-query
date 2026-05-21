@@ -239,6 +239,27 @@
           5139737.883
         ]
       }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "small-cabin-ne-aoi",
+        "name": "Unnamed small cabin (NE quadrant of AOI)",
+        "type": "cabin",
+        "category": "positive_in_scope",
+        "source": "google_earth imagery dated 2013-05-09 (no OSM record found)",
+        "findable_aerial": false,
+        "findable_lidar": null,
+        "mvp_required": true,
+        "notes": "Small rectangular structure visible only in leaf-off / pre-leaf-out Google Earth imagery; fully canopy-occluded in all 6 NAIP cycles (summer leaf-on). Verified by S05 inspection - primary chip r034_c028 did not surface on any aerial-only query in the S05 N0 harness. Locked as an MVP success criterion (mvp_required=true): end-to-end MVP must return this location for a 'cabin' / 'abandoned cabin' query via the LiDAR modality added at S08/S09. See docs/architecture_plans/mvp-necessity-roadmap.md MVP success criteria section."
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          336631.294,
+          5143074.806
+        ]
+      }
     }
   ]
 }

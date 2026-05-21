@@ -1,4 +1,4 @@
-"""CLI for the NAIP ingest step (S3 BUILD steps 3-4).
+"""CLI: fetch the per-cycle NAIP COGs picked by `discover_aerial`.
 
 Reads the per-cycle picks from the NAIP manifest, fetches each one
 (idempotent), and updates the manifest with asset URLs and fetch

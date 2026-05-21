@@ -1,8 +1,8 @@
-"""Gate checks for S3 aerial ingest.
+"""Gate checks for the aerial ingest pipeline.
 
-Tests filled in across BUILD steps 3-6. Steps that pull network data
-produce on-disk COGs; these tests read those COGs. Tests that need a
-COG that has not been fetched yet skip cleanly.
+Steps that pull network data produce on-disk COGs; these tests read
+those COGs. Tests that need a COG that has not been fetched yet skip
+cleanly.
 """
 
 from __future__ import annotations
