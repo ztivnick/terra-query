@@ -83,61 +83,34 @@ def spec(model_id: str) -> ModelSpec:
     return MODELS[model_id]
 
 
-def _unwrap_state_dict(obj):
-    """Some checkpoints wrap the state_dict under 'state_dict' / 'model'
-    and may include optimizer state. Find the actual state dict."""
-    if not isinstance(obj, dict):
-        return obj
-    for key in ("state_dict", "model", "model_state_dict"):
-        if key in obj and isinstance(obj[key], dict):
-            return obj[key]
-    return obj
-
-
-def _strip_ddp_prefix(sd: dict) -> dict:
-    return {k[len("module.") :] if k.startswith("module.") else k: v for k, v in sd.items()}
-
-
 def load(model_id: str, weights_path: str | Path | None, device: str):
     """Load model + image preprocess + text tokenizer onto `device`.
 
     For `open_clip_pretrained`, `weights_path` is ignored (open_clip handles
     its own cache via `pretrained=<tag>`). For `huggingface`, `weights_path`
-    must point to the local .pt file fetched by `fetch_weights`.
+    must point to a local checkpoint file fetched by `fetch_weights`.
 
     Returns: (model, preprocess, tokenizer). Model is in eval() mode on
     `device`.
     """
     import open_clip
-    import torch
 
     s = spec(model_id)
 
     if s.source == "open_clip_pretrained":
-        model, _, preprocess = open_clip.create_model_and_transforms(
-            s.arch, pretrained=s.pretrained, device=device
-        )
+        pretrained: str | None = s.pretrained
     elif s.source == "huggingface":
         if weights_path is None:
             raise ValueError(f"{model_id}: huggingface source requires weights_path")
-        model, _, preprocess = open_clip.create_model_and_transforms(
-            s.arch, pretrained=None, device=device
-        )
-        raw = torch.load(str(weights_path), map_location="cpu", weights_only=False)
-        sd = _strip_ddp_prefix(_unwrap_state_dict(raw))
-        missing, unexpected = model.load_state_dict(sd, strict=False)
-        if missing:
-            raise RuntimeError(
-                f"{model_id}: state dict missing {len(missing)} keys, first 5: {missing[:5]}"
-            )
-        if unexpected:
-            print(
-                f"[load {model_id}] ignored {len(unexpected)} unexpected keys "
-                f"(optimizer / training state), first 3: {unexpected[:3]}"
-            )
+        # pass the local file path directly; open_clip's loader handles
+        # state_dict unwrapping, DDP prefix, and pos-embed resizing.
+        pretrained = str(weights_path)
     else:
         raise ValueError(f"unknown source {s.source!r} for {model_id}")
 
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        s.arch, pretrained=pretrained, device=device
+    )
     model = model.to(device).eval()
     tokenizer = open_clip.get_tokenizer(s.arch)
     return model, preprocess, tokenizer

@@ -1,0 +1,592 @@
+#!/usr/bin/env python3
+"""Bring up the local stack: db (docker), backend (uvicorn), frontend (vite).
+
+If a previous run left stale processes around (a leftover `vite`, a stuck
+`uvicorn`, another `start` instance, the docker-compose `api` service
+binding :8000), they are detected and shut down before spawning fresh.
+
+Ctrl+C / SIGTERM / SIGHUP / a child crashing all trigger a graceful
+shutdown of every child (children run in their own process group so
+their grandchildren are reaped too). The db container is only stopped
+if this script started it.
+
+Stdlib only. POSIX.
+"""
+
+from __future__ import annotations
+
+import atexit
+import hashlib
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent
+FRONTEND_DIR = REPO / "frontend"
+
+BACKEND_HOST = "127.0.0.1"
+BACKEND_PORT = 8000
+FRONTEND_PORT = 5173
+REQUIRED_PORTS = (BACKEND_PORT, FRONTEND_PORT)
+
+GRACEFUL_TIMEOUT_S = 8.0   # SIGTERM -> SIGKILL during shutdown
+RECLAIM_DEADLINE_S = 8.0   # total time allowed to free a held port
+READY_TIMEOUT_S = 120.0    # how long to keep probing /healthz and /
+
+# per-repo pid file so a second `start` invocation can find and stop the first
+_REPO_HASH = hashlib.sha1(str(REPO).encode()).hexdigest()[:12]
+PID_FILE = Path(f"/tmp/terra-query-start-{_REPO_HASH}.pid")
+
+
+class C:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    MAGENTA = "\033[35m"
+    CYAN = "\033[36m"
+
+
+_TTY = sys.stdout.isatty()
+_PRINT_LOCK = threading.Lock()
+
+
+def _paint(text: str, *codes: str) -> str:
+    if not _TTY or not codes:
+        return text
+    return "".join(codes) + text + C.RESET
+
+
+def log(prefix: str, line: str, *codes: str) -> None:
+    label = _paint(f"[{prefix:>8}]", *codes)
+    with _PRINT_LOCK:
+        try:
+            sys.stdout.write(f"{label} {line}\n")
+            sys.stdout.flush()
+        except (BrokenPipeError, ValueError):
+            pass
+
+
+def blank() -> None:
+    with _PRINT_LOCK:
+        try:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        except (BrokenPipeError, ValueError):
+            pass
+
+
+class Proc:
+    """One spawned child with a background thread streaming its output."""
+
+    def __init__(
+        self,
+        name: str,
+        popen: "subprocess.Popen[bytes]",
+        color_codes: tuple[str, ...],
+    ) -> None:
+        self.name = name
+        self.popen = popen
+        self.color_codes = color_codes
+        self.reader = threading.Thread(target=self._read, name=f"{name}-reader", daemon=True)
+        self.reader.start()
+
+    def _read(self) -> None:
+        stream = self.popen.stdout
+        assert stream is not None
+        try:
+            for raw in iter(stream.readline, b""):
+                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                if line:
+                    log(self.name, line, *self.color_codes)
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+
+PROCS: list[Proc] = []
+_DB_STARTED_BY_US = False
+_SHUTDOWN_LOCK = threading.Lock()
+_SHUT_DOWN = False
+
+
+def spawn(
+    name: str,
+    cmd: list[str],
+    cwd: Path,
+    env_overrides: dict[str, str] | None,
+    color_codes: tuple[str, ...],
+) -> Proc:
+    env = os.environ.copy()
+    # uv refuses a foreign VIRTUAL_ENV; strip so `uv run` finds the project's .venv
+    env.pop("VIRTUAL_ENV", None)
+    # unbuffered child output -> live log streaming
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # non-interactive: no editors, no banners
+    env.setdefault("CI", "1")
+    # tools that suppress color on non-TTY pipes should still color
+    env["FORCE_COLOR"] = "1"
+    if env_overrides:
+        env.update(env_overrides)
+
+    log("start", f"spawning {name}: {' '.join(cmd)}", C.YELLOW)
+    log("start", f"            cwd={cwd}", C.DIM)
+    popen = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        # new session/process group: killpg cleans up grandchildren, and
+        # Ctrl+C in the terminal hits only this script, not the children.
+        start_new_session=True,
+    )
+    p = Proc(name=name, popen=popen, color_codes=color_codes)
+    PROCS.append(p)
+    return p
+
+
+# ---------- helpers: pid + port reclamation ----------
+
+def _is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but in another session
+
+
+def _wait_for_exit(pid: int, timeout: float) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not _is_alive(pid):
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def _proc_command(pid: int) -> str:
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=3,
+        )
+        return (out.stdout or "").strip() or "?"
+    except Exception:
+        return "?"
+
+
+def _signal_pid(pid: int, sig: int) -> None:
+    """Signal the pid's process group when it's a group leader, else the pid alone."""
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, PermissionError):
+        return
+    target = pgid if pgid == pid else pid
+    try:
+        if target == pgid:
+            os.killpg(pgid, sig)
+        else:
+            os.kill(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _kill_pid_aggressively(pid: int) -> bool:
+    if not _is_alive(pid):
+        return True
+    _signal_pid(pid, signal.SIGTERM)
+    if _wait_for_exit(pid, 4.0):
+        return True
+    _signal_pid(pid, signal.SIGKILL)
+    return _wait_for_exit(pid, 2.0)
+
+
+def _read_pidfile() -> int | None:
+    try:
+        return int(PID_FILE.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def _write_pidfile() -> None:
+    try:
+        PID_FILE.write_text(str(os.getpid()))
+    except OSError as exc:
+        log("start", f"could not write pidfile {PID_FILE}: {exc}", C.YELLOW)
+
+
+def _remove_pidfile() -> None:
+    # only remove if the file still belongs to us
+    prev = _read_pidfile()
+    if prev == os.getpid():
+        try:
+            PID_FILE.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _stop_previous_instance() -> None:
+    prev = _read_pidfile()
+    if prev is None:
+        return
+    if prev == os.getpid():
+        return
+    if not _is_alive(prev):
+        try:
+            PID_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    cmd = _proc_command(prev)
+    log("start", f"previous instance running (pid {prev}): {cmd}", C.YELLOW)
+    log("start", f"stopping it before we proceed ...", C.YELLOW, C.BOLD)
+    if not _kill_pid_aggressively(prev):
+        log("start", f"warning: previous instance pid {prev} still alive", C.RED)
+    try:
+        PID_FILE.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((BACKEND_HOST, port))
+            return False
+        except OSError:
+            return True
+
+
+def _pids_listening_on(port: int) -> list[int]:
+    if shutil.which("lsof") is None:
+        return []
+    try:
+        out = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return []
+    return sorted({int(p) for p in out.stdout.split() if p.strip().isdigit()})
+
+
+def _reclaim_port(port: int) -> bool:
+    if not _port_in_use(port):
+        return True
+    pids = _pids_listening_on(port)
+    if not pids:
+        # port held but lsof couldn't identify the holder; nothing we can target
+        log("start", f"port {port} in use but holder is unknown", C.RED, C.BOLD)
+        return False
+    for pid in pids:
+        cmd = _proc_command(pid)
+        log("start", f"port {port} held by pid {pid}: {cmd}", C.YELLOW)
+        log("start", f"reclaiming port {port} (pid {pid}) ...", C.YELLOW, C.BOLD)
+        _kill_pid_aggressively(pid)
+    # let the OS reclaim the socket
+    time.sleep(0.3)
+    return not _port_in_use(port)
+
+
+def _reclaim_required_ports() -> None:
+    for port in REQUIRED_PORTS:
+        deadline = time.time() + RECLAIM_DEADLINE_S
+        while time.time() < deadline:
+            if _reclaim_port(port):
+                break
+            time.sleep(0.5)
+        if _port_in_use(port):
+            log("start", f"giving up; port {port} is still occupied", C.RED, C.BOLD)
+            sys.exit(2)
+
+
+# ---------- helpers: docker / db ----------
+
+def _docker_daemon_up() -> bool:
+    try:
+        out = subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return False
+    return out.returncode == 0 and bool(out.stdout.strip())
+
+
+def _services_running() -> set[str]:
+    try:
+        out = subprocess.run(
+            ["docker", "compose", "ps", "--status=running", "--services"],
+            cwd=REPO, capture_output=True, text=True, timeout=20, check=True,
+        )
+    except Exception:
+        return set()
+    return {ln.strip() for ln in out.stdout.splitlines() if ln.strip()}
+
+
+def _stop_compose_api_if_running() -> None:
+    """Stop the docker-compose `api` service if it's holding :8000."""
+    if "api" not in _services_running():
+        return
+    log("start", "stopping docker compose 'api' service (host uvicorn takes :8000) ...", C.YELLOW)
+    subprocess.run(
+        ["docker", "compose", "stop", "api"],
+        cwd=REPO, check=False, timeout=60,
+        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+    )
+
+
+def _ensure_db() -> None:
+    """Bring up the db service and wait for it to be healthy.
+
+    `docker compose up -d --wait db` is idempotent: no-op if already healthy,
+    waits if up but unhealthy, starts otherwise.
+    """
+    global _DB_STARTED_BY_US
+    was_running = "db" in _services_running()
+    if was_running:
+        log("start", "ensuring db is healthy ...", C.MAGENTA)
+    else:
+        log("start", "bringing up db ...", C.MAGENTA)
+    proc = subprocess.run(
+        ["docker", "compose", "up", "-d", "--wait", "--wait-timeout", "60", "db"],
+        cwd=REPO,
+    )
+    if proc.returncode != 0:
+        log("start", f"docker compose up failed (rc={proc.returncode})", C.RED, C.BOLD)
+        sys.exit(proc.returncode)
+    if not was_running:
+        _DB_STARTED_BY_US = True
+        log("start", "db is healthy", C.MAGENTA, C.BOLD)
+    else:
+        log("start", "db is healthy (was already running)", C.MAGENTA)
+
+
+# ---------- readiness probes ----------
+
+def _http_ok(url: str, timeout: float = 1.0) -> bool:
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return 200 <= r.status < 400
+    except Exception:
+        return False
+
+
+def _ready_probe(name: str, url: str, codes: tuple[str, ...]) -> None:
+    deadline = time.time() + READY_TIMEOUT_S
+    while time.time() < deadline:
+        if _SHUT_DOWN:
+            return
+        if _http_ok(url):
+            log("start", f"{name} ready -> {url}", *codes)
+            return
+        time.sleep(0.5)
+
+
+# ---------- shutdown ----------
+
+def _signal_group(p: Proc, sig: int) -> None:
+    if p.popen.poll() is not None:
+        return
+    try:
+        pgid = os.getpgid(p.popen.pid)
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        pass
+
+
+def shutdown(reason: str = "exit") -> None:
+    global _SHUT_DOWN
+    with _SHUTDOWN_LOCK:
+        if _SHUT_DOWN:
+            return
+        _SHUT_DOWN = True
+
+    log("start", f"shutting down ({reason}) ...", C.YELLOW, C.BOLD)
+
+    for p in PROCS:
+        rc = p.popen.poll()
+        if rc is None:
+            log("start", f"SIGTERM {p.name} (pid={p.popen.pid})", C.DIM)
+            _signal_group(p, signal.SIGTERM)
+        else:
+            log("start", f"{p.name} already exited (rc={rc})", C.DIM)
+
+    deadline = time.time() + GRACEFUL_TIMEOUT_S
+    while time.time() < deadline:
+        if all(p.popen.poll() is not None for p in PROCS):
+            break
+        time.sleep(0.1)
+
+    for p in PROCS:
+        if p.popen.poll() is None:
+            log("start", f"force-killing {p.name} (SIGKILL)", C.RED, C.BOLD)
+            _signal_group(p, signal.SIGKILL)
+            try:
+                p.popen.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+
+    if _DB_STARTED_BY_US:
+        log("start", "stopping db container (we brought it up) ...", C.MAGENTA)
+        try:
+            subprocess.run(
+                ["docker", "compose", "stop", "db"],
+                cwd=REPO, timeout=60, check=False,
+                stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+            )
+        except Exception as exc:
+            log("start", f"docker compose stop db failed: {exc}", C.RED)
+    else:
+        log("start", "leaving db container running (it was up before)", C.DIM)
+
+    _remove_pidfile()
+    log("start", "shutdown complete.", C.YELLOW, C.BOLD)
+
+
+atexit.register(shutdown, reason="atexit")
+
+
+def _install_signal_handlers() -> None:
+    def handler(signum: int, _frame) -> None:
+        try:
+            name = signal.Signals(signum).name
+        except ValueError:
+            name = f"signal {signum}"
+        log("start", f"received {name}", C.YELLOW, C.BOLD)
+        shutdown(reason=name)
+        sys.exit(128 + signum)
+
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, handler)
+
+
+# ---------- preflight ----------
+
+def _require(tool: str, hint: str = "") -> None:
+    if shutil.which(tool) is None:
+        log("start", f"missing required tool: {tool!r}", C.RED, C.BOLD)
+        if hint:
+            log("start", hint, C.RED)
+        sys.exit(2)
+
+
+def _ensure_node_modules() -> None:
+    if (FRONTEND_DIR / "node_modules").exists():
+        return
+    log("start", "frontend/node_modules missing; running `npm install` ...", C.GREEN)
+    rc = subprocess.run(["npm", "install"], cwd=FRONTEND_DIR).returncode
+    if rc != 0:
+        log("start", f"npm install failed (rc={rc})", C.RED, C.BOLD)
+        sys.exit(rc)
+
+
+# ---------- main ----------
+
+def main() -> int:
+    _install_signal_handlers()
+    log("start", f"repo: {REPO}", C.YELLOW)
+
+    _require("docker", "install Docker Desktop, then start it.")
+    _require("uv", "install with `brew install uv` or see https://docs.astral.sh/uv/")
+    _require("npm", "install Node (e.g. `brew install node`).")
+
+    if not _docker_daemon_up():
+        log("start", "docker daemon is not reachable; start Docker Desktop and retry", C.RED, C.BOLD)
+        return 2
+
+    # ordering matters:
+    # 1. kill any previous `start` instance so its supervisor doesn't fight us
+    # 2. take down the docker compose 'api' service if it's holding :8000
+    # 3. reclaim host ports (catches stray uvicorn / vite / etc.)
+    # 4. ensure db is up + healthy
+    # 5. spawn fresh
+    _stop_previous_instance()
+    _ensure_node_modules()
+    _stop_compose_api_if_running()
+    _reclaim_required_ports()
+    _ensure_db()
+    _write_pidfile()
+
+    spawn(
+        name="backend",
+        cmd=[
+            "uv", "run", "uvicorn",
+            "terra_query.api.app:create_app",
+            "--factory",
+            "--host", BACKEND_HOST,
+            "--port", str(BACKEND_PORT),
+        ],
+        cwd=REPO,
+        env_overrides=None,
+        color_codes=(C.CYAN,),
+    )
+
+    spawn(
+        name="frontend",
+        cmd=["npm", "run", "dev", "--silent"],
+        cwd=FRONTEND_DIR,
+        env_overrides={
+            "VITE_TERRA_QUERY_API_URL": f"http://localhost:{BACKEND_PORT}",
+        },
+        color_codes=(C.GREEN,),
+    )
+
+    threading.Thread(
+        target=_ready_probe,
+        args=("backend", f"http://{BACKEND_HOST}:{BACKEND_PORT}/healthz", (C.CYAN, C.BOLD)),
+        daemon=True, name="backend-probe",
+    ).start()
+    threading.Thread(
+        target=_ready_probe,
+        args=("frontend", f"http://localhost:{FRONTEND_PORT}/", (C.GREEN, C.BOLD)),
+        daemon=True, name="frontend-probe",
+    ).start()
+
+    blank()
+    log("start", f"backend  -> http://localhost:{BACKEND_PORT}", C.CYAN, C.BOLD)
+    log("start", f"frontend -> http://localhost:{FRONTEND_PORT}", C.GREEN, C.BOLD)
+    log("start", "press Ctrl+C to stop everything", C.YELLOW)
+    blank()
+
+    try:
+        while True:
+            time.sleep(0.5)
+            for p in PROCS:
+                rc = p.popen.poll()
+                if rc is not None:
+                    log(
+                        "start",
+                        f"{p.name} exited unexpectedly (rc={rc}); tearing down",
+                        C.RED, C.BOLD,
+                    )
+                    shutdown(reason=f"{p.name}-died")
+                    return rc or 1
+    except KeyboardInterrupt:
+        shutdown(reason="KeyboardInterrupt")
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

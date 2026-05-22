@@ -29,6 +29,13 @@ NAIP_BAND_COUNT = 4  # R, G, B, NIR
 RGB_BANDS = (1, 2, 3)
 CIR_BANDS = (4, 1, 2)  # NIR, R, G - standard pseudo-color for vegetation/water
 
+# the source-of-truth mapping from the YAML's `bands` string to a 1-indexed
+# rasterio band tuple. callers (api, eval, etc.) should import from here.
+BAND_TUPLES: dict[str, tuple[int, ...]] = {
+    "rgb": RGB_BANDS,
+    "cir": CIR_BANDS,
+}
+
 
 @dataclass(frozen=True)
 class ChipBox:

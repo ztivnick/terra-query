@@ -213,6 +213,16 @@ def db_roundtrip_log(experiment_id: str) -> Path:
     return gate_dir(experiment_id) / "s06_db_roundtrip.txt"
 
 
+def chip_thumbnails_dir(experiment_id: str) -> Path:
+    """On-demand chip thumbnail cache; safe to `rm -rf` to invalidate."""
+    return experiment_outputs_dir(experiment_id) / "chip_thumbnails"
+
+
+def chip_thumbnail_key(chip_location_id: str, cycle: str, bands: str) -> str:
+    """Storage key for one chip thumbnail. Pure; no FS access."""
+    return f"{chip_location_id}__{cycle}__{bands}.png"
+
+
 # ---- per-model resolvers ----
 
 def model_weights_dir(model_id: str) -> Path:

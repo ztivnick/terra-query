@@ -1,20 +1,13 @@
 """Vector-store search: HNSW ANN, max-pool across cycles, optional spatial filter.
 
-Query path:
-
-1. ANN over the candidate rows (filtered by model_id / bands / optional
-   spatial predicate) via HNSW + cosine distance.
-2. Overfetch enough rows to cover every cycle of the top_k chip-locations.
-3. GROUP BY chip_location_id, taking MAX(score) -> "best cycle for this
-   place" semantics.
-4. Return the top_k locations by max score.
-
-`overfetch` defaults to top_k * 12 (top_k * n_cycles=6 * safety_factor=2).
-Bump it via the kwarg if recall degrades at production scale.
+Query path: ANN -> overfetch rows -> GROUP BY chip_location_id with
+MAX(score) -> top_k locations. Overfetch defaults to a multiple of
+top_k; bump it via the kwarg if recall degrades.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -23,6 +16,19 @@ from psycopg import sql
 
 from terra_query.embed.models import PRODUCTION_MODEL_ID
 from terra_query.vector_store.db import connect
+
+# pgvector HNSW recall knob. The pgvector default (40) is too low for
+# our scale: chips whose true cosine is highest can sit outside the
+# search frontier and never enter the candidate set. Override via env.
+EF_SEARCH_ENV = "TERRA_QUERY_HNSW_EF_SEARCH"
+DEFAULT_EF_SEARCH = 1000
+
+
+def _resolve_ef_search() -> int:
+    raw = os.environ.get(EF_SEARCH_ENV)
+    if not raw:
+        return DEFAULT_EF_SEARCH
+    return int(raw)
 
 
 @dataclass(frozen=True)
@@ -43,8 +49,7 @@ class SearchHit:
 
 
 def _default_overfetch(top_k: int) -> int:
-    # n_cycles = 6 in the MVP; safety factor 2x. Floor at 60 so tiny top_k
-    # still has headroom.
+    # multiplier covers per-cycle expansion + safety; floor gives small top_k headroom
     return max(top_k * 12, 60)
 
 
@@ -137,8 +142,14 @@ def search(
         LIMIT %(top_k)s
     """).format(where=where_clause)
 
+    ef_search = _resolve_ef_search()
+
     def _run(c: psycopg.Connection) -> list[tuple]:
         with c.cursor() as cur:
+            # session-level SET so it applies even on autocommit connections
+            cur.execute(sql.SQL("SET hnsw.ef_search = {}").format(
+                sql.Literal(ef_search)
+            ))
             cur.execute(query, {"q": q, "overfetch": overfetch, "top_k": top_k})
             return cur.fetchall()
 

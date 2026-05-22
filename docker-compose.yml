@@ -19,5 +19,27 @@ services:
       timeout: 3s
       retries: 20
 
+  api:
+    build:
+      context: .
+      dockerfile: infra/api/Dockerfile
+    image: terra-query-api:local
+    container_name: terra-query-api
+    restart: unless-stopped
+    environment:
+      # service-name host (not the host-only mapping)
+      TERRA_QUERY_DATABASE_URL: postgresql://terra:terra@db:5432/terra_query
+      TERRA_QUERY_CORS_ORIGINS: "http://localhost:5173,http://localhost:4173"
+      # default off in-container; unset for in-container model loading
+      TERRA_QUERY_SKIP_MODEL_LOAD: "1"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./experiments:/app/experiments
+
 volumes:
   pgdata:
