@@ -1,11 +1,12 @@
 """CLI: fetch the per-cycle NAIP COGs picked by `discover_aerial`.
 
-Reads the per-cycle picks from the NAIP manifest, fetches each one
-(idempotent), and updates the manifest with asset URLs and fetch
-timestamps. Run as:
+Reads the per-cycle picks from the per-AOI NAIP manifest, fetches each
+one (idempotent), and updates the manifest with asset URLs and fetch
+timestamps. AOI is resolved via the experiment config's `aoi_id`.
 
-    uv run python -m terra_query.ingest.cli.fetch_naip          # all cycles
+    uv run python -m terra_query.ingest.cli.fetch_naip                # all cycles
     uv run python -m terra_query.ingest.cli.fetch_naip --year 2022
+    uv run python -m terra_query.ingest.cli.fetch_naip --experiment /path/to/cfg.yaml
 """
 
 from __future__ import annotations
@@ -15,12 +16,14 @@ import json
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
+from terra_query.core import config
 from terra_query.core.paths import (
-    AOI_WGS84,
-    NAIP_MANIFEST,
     REPO_ROOT,
+    aoi_wgs84,
     naip_cog,
+    naip_manifest,
 )
 from terra_query.ingest.aerial import (
     NAIP_COLLECTION,
@@ -50,13 +53,21 @@ def _picks_from_cycle(cycle: dict) -> list[StacPick]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", help="only fetch this cycle year")
+    parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order.",
+    )
     args = parser.parse_args()
+    cfg = config.load_experiment(args.experiment)
+    aoi_id = config.aoi_id_of(cfg)
 
-    aoi = json.loads(AOI_WGS84.read_text())
+    aoi = json.loads(aoi_wgs84(aoi_id).read_text())
     bounds = aoi_bounds_buffered_26916(aoi)
+    print(f"AOI id: {aoi_id}")
     print(f"AOI 26916 buffered bounds: {bounds}")
 
-    manifest = json.loads(NAIP_MANIFEST.read_text())
+    manifest_path = naip_manifest(aoi_id)
+    manifest = json.loads(manifest_path.read_text())
     cycles = manifest["cycles"]
     if args.year:
         cycles = [c for c in cycles if c["year"] == args.year]
@@ -66,7 +77,7 @@ def main() -> int:
 
     for cycle in cycles:
         year = cycle["year"]
-        out = naip_cog(year)
+        out = naip_cog(aoi_id, year)
         picks = _picks_from_cycle(cycle)
         print(f"[NAIP {year}] {len(picks)} items -> {out.relative_to(REPO_ROOT)}")
         t0 = time.monotonic()
@@ -89,7 +100,7 @@ def main() -> int:
 
     # Re-save manifest (with updated assets / fetched_at)
     manifest["last_fetch_at"] = _now_utc()
-    NAIP_MANIFEST.write_text(json.dumps(manifest, indent=2))
+    manifest_path.write_text(json.dumps(manifest, indent=2))
     return 0
 
 

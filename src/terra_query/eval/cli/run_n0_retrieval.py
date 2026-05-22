@@ -3,10 +3,11 @@
 Loads chip index + eval features, builds GT (findable + strict), loops over
 every (model, bands) combo: encode every concept's prompt ensemble, search
 across the per-cycle embeddings with max-pool, compute hit/recall/MRR,
-render top-10 thumbnails per concept. Writes:
-  - data/verification/gate/n0_retrieval_results.json
-  - data/verification/gate/n0_retrieval_report.md
-  - data/verification/gate/topk_chips/<concept>__<model>__<bands>/rank_<R>_<chip>.png
+render top-10 thumbnails per concept. Writes (paths resolved per
+`core/paths.py` from the experiment id):
+  - <gate_dir>/n0_retrieval_results.json
+  - <gate_dir>/n0_retrieval_report.md
+  - <gate_dir>/topk_chips/<concept>__<model>__<bands>/rank_<R>_<chip>.png
 Then prints the automated verdict (5 PASS/FAIL checks).
 """
 
@@ -21,23 +22,22 @@ from pathlib import Path
 
 import numpy as np
 
+from terra_query.core import config
 from terra_query.core.paths import (
     MODEL_WEIGHTS_MANIFEST,
-    N0_REPORT_MD,
-    N0_RESULTS_JSON,
-    TOPK_CHIPS_DIR,
+    n0_report_md,
+    n0_results_json,
     naip_cog,
     topk_chip_dir,
+    topk_chips_dir,
 )
 from terra_query.embed import models, query
 from terra_query.eval import n0_retrieval, queries
 from terra_query.eval.n0_retrieval import K_VALUES
 from terra_query.ingest.chips import RGB_BANDS, ChipBox, read_chip
+from terra_query.vector_store.db import connect as vs_connect
 
-CYCLES = ["2012", "2014", "2016", "2018", "2020", "2022"]
 ALL_BANDS = ["rgb", "cir"]
-DEFAULT_BANDS_FOR_DEFAULT_CONFIGS = "rgb"  # production is RGB-only; CIR is opt-in
-THUMBNAIL_CYCLE = "2022"
 TOPK_THUMBNAILS = 10
 
 
@@ -51,6 +51,9 @@ def _chip_box(loc: dict) -> ChipBox:
 
 
 def render_thumbnails(
+    experiment_id: str,
+    aoi_id: str,
+    fallback_cycle: str,
     concept: str,
     model_id: str,
     bands: str,
@@ -64,11 +67,12 @@ def render_thumbnails(
 
     Uses each chip's WINNING cycle (the cycle whose embedding gave the
     max-pool score) so the thumbnail shows the model actually saw that
-    appearance. Falls back to 2022 if a winning cycle's COG is missing.
+    appearance. Falls back to `fallback_cycle` if a winning cycle's COG
+    is missing.
     """
     from PIL import Image
 
-    out_dir = topk_chip_dir(concept, model_id, bands)
+    out_dir = topk_chip_dir(experiment_id, concept, model_id, bands)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for rank, (idx, cycle, score) in enumerate(
@@ -80,9 +84,9 @@ def render_thumbnails(
         out_path = out_dir / f"rank_{rank:02d}__{chip_id_location}__cyc{cycle}__sim{score:.3f}.png"
         if out_path.exists() and not force:
             continue
-        cog = naip_cog(cycle)
+        cog = naip_cog(aoi_id, cycle)
         if not cog.exists():
-            cog = naip_cog(THUMBNAIL_CYCLE)
+            cog = naip_cog(aoi_id, fallback_cycle)
         arr = read_chip(_chip_box(loc), cog, bands=RGB_BANDS)  # (3, h, w) uint8
         hwc = np.transpose(arr, (1, 2, 0))
         Image.fromarray(hwc, mode="RGB").save(out_path)
@@ -90,6 +94,9 @@ def render_thumbnails(
 
 
 def evaluate_one_combo(
+    experiment_id: str,
+    aoi_id: str,
+    fallback_cycle: str,
     model_id: str,
     bands: str,
     cycles: list[str],
@@ -99,8 +106,10 @@ def evaluate_one_combo(
     locations: list[dict],
     device: str,
     weights_entry: dict,
+    chip_loc_to_idx: dict[str, int],
+    db_conn,
 ) -> dict:
-    """Encode every concept's prompts and run search for one (model, bands)."""
+    """Encode every concept's prompts and run search via the vector store."""
     t_load = time.time()
     print(f"\n=== {model_id} / {bands} ===")
     print(f"[{model_id}/{bands}] loading model for text encoding ...")
@@ -109,7 +118,21 @@ def evaluate_one_combo(
     )
     print(f"[{model_id}/{bands}] model loaded in {time.time() - t_load:.1f}s")
 
-    embeddings, _ = n0_retrieval.load_embeddings_for_combo(model_id, bands, cycles)
+    # pre-flight: rows must exist in the DB for this (model, bands)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM chip_embeddings "
+            "WHERE model_id = %s AND bands = %s",
+            (model_id, bands),
+        )
+        n_rows = cur.fetchone()[0]
+    if n_rows == 0:
+        raise SystemExit(
+            f"chip_embeddings has 0 rows for ({model_id}, {bands}). "
+            f"Run `python -m terra_query.vector_store.cli.load_embeddings "
+            f"--model {model_id} --bands {bands}` first."
+        )
+    print(f"[{model_id}/{bands}] {n_rows} rows in vector store")
 
     combo_out: dict[str, dict] = {}
     try:
@@ -119,14 +142,19 @@ def evaluate_one_combo(
             gt_f = gt_findable.get(concept, set())
             gt_s = gt_strict.get(concept, set())
 
-            res_findable = n0_retrieval.evaluate_concept(
-                concept, text_emb, embeddings, gt_f, top_k_max=max(K_VALUES)
+            res_findable = n0_retrieval.evaluate_concept_via_db(
+                concept, text_emb, chip_loc_to_idx, gt_f,
+                top_k_max=max(K_VALUES),
+                model_id=model_id, bands=bands, conn=db_conn,
             )
-            res_strict = n0_retrieval.evaluate_concept(
-                concept, text_emb, embeddings, gt_s, top_k_max=max(K_VALUES)
+            res_strict = n0_retrieval.evaluate_concept_via_db(
+                concept, text_emb, chip_loc_to_idx, gt_s,
+                top_k_max=max(K_VALUES),
+                model_id=model_id, bands=bands, conn=db_conn,
             )
 
             render_thumbnails(
+                experiment_id, aoi_id, fallback_cycle,
                 concept, model_id, bands,
                 res_findable.top_k_indices, res_findable.top_k_cycles,
                 res_findable.top_k_scores, locations,
@@ -154,6 +182,9 @@ def evaluate_one_combo(
 
 
 def evaluate_ensemble(
+    experiment_id: str,
+    aoi_id: str,
+    fallback_cycle: str,
     member_model_ids: list[str],
     bands: str,
     cycles: list[str],
@@ -188,7 +219,7 @@ def evaluate_ensemble(
             mid, weights_path=weights_entry.get("weights_path"), device=device
         )
         text_models[mid] = (model, tokenizer)
-        embs, _ = n0_retrieval.load_embeddings_for_combo(mid, bands, cycles)
+        embs, _ = n0_retrieval.load_embeddings_for_combo(experiment_id, mid, bands, cycles)
         embeddings_by_member[mid] = embs
     print(f"[ensemble] all {len(member_model_ids)} members loaded in {time.time() - t_load:.1f}s")
 
@@ -222,6 +253,7 @@ def evaluate_ensemble(
             # thumbnails: use the ensemble config key as the folder prefix
             # so they don't collide with single-model thumbnails
             render_thumbnails(
+                experiment_id, aoi_id, fallback_cycle,
                 concept, cfg_key, bands,
                 res_f.top_k_indices, res_f.top_k_cycles, res_f.top_k_scores, locations,
             )
@@ -410,12 +442,15 @@ def _config_label(cfg_key: str) -> str:
 
 
 def write_markdown_report(
+    experiment_id: str,
     results: dict,
     gt_findable: dict[str, set[int]],
     gt_strict: dict[str, set[int]],
-    out_path: Path = N0_REPORT_MD,
+    out_path: Path | None = None,
 ) -> None:
     """Write the human-readable gate report."""
+    if out_path is None:
+        out_path = n0_report_md(experiment_id)
     per_config = results["per_config"]
     random_bl = results["random_baseline"]
     n_chips = results["n_chips"]
@@ -565,16 +600,17 @@ def write_markdown_report(
 
     # ---- section E: no-GT concepts (qualitative only) ----
     lines.append("## E. No-GT concepts (visual top-K only)\n")
+    tk_dir = topk_chips_dir(experiment_id)
     lines.append(
         f"No recall metric for these (no labeled feature in the eval set). "
         f"Open the thumbnail folders under "
-        f"`{TOPK_CHIPS_DIR.relative_to(TOPK_CHIPS_DIR.parents[2])}/` to inspect:\n"
+        f"`{tk_dir.relative_to(tk_dir.parents[3])}/` to inspect:\n"
     )
     for concept in queries.NO_GT_CONCEPTS:
         lines.append(f"- **{concept}**")
         for cfg in per_config:
-            d = topk_chip_dir(concept, *cfg.split("__"))
-            lines.append(f"  - `{d.relative_to(d.parents[3])}`")
+            d = topk_chip_dir(experiment_id, concept, *cfg.split("__"))
+            lines.append(f"  - `{d.relative_to(d.parents[4])}`")
         lines.append("")
 
     # ---- section F: gate verdict (automated checks 1-5) ----
@@ -685,11 +721,16 @@ def write_markdown_report(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the N0 retrieval gate harness.")
     parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order.",
+    )
+    parser.add_argument(
         "--configs", nargs="*", default=None,
         help=(
-            "Subset of (model, bands) configs like 'georsclip-vit-l-14-336__rgb'. "
-            "Default = the production model on rgb (one config). To add a candidate "
-            "to an A/B sweep, register it in embed.models.MODELS and pass it here."
+            "Subset of (model, bands) configs as 'model_id__bands' tokens. "
+            "Default = the YAML model_id on YAML bands (one config). To add "
+            "a candidate to an A/B sweep, register it in embed.models.MODELS "
+            "and pass it here."
         ),
     )
     parser.add_argument(
@@ -698,7 +739,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--cycles", nargs="*", default=None,
-        help="Subset of cycles; default = all 6.",
+        help="Subset of cycles; default = the YAML cycles.",
     )
     parser.add_argument(
         "--ensemble", default=None,
@@ -706,31 +747,42 @@ def main() -> None:
             "Run the ensemble search across a comma-separated list of model "
             "ids registered in embed.models.MODELS. The first id is the primary "
             "(its argmax cycle is reported per chip). Pairs with --bands "
-            "(default rgb). Mutually exclusive with --configs."
+            "(default = YAML bands). Mutually exclusive with --configs."
         ),
     )
     parser.add_argument(
-        "--bands", default="rgb", choices=ALL_BANDS,
+        "--bands", default=None, choices=ALL_BANDS,
         help="Bands for --ensemble (single value). Ignored when --configs is set.",
     )
     args = parser.parse_args()
 
+    cfg = config.load_experiment(args.experiment)
+    experiment_id = config.experiment_id_of(cfg)
+    aoi_id = config.aoi_id_of(cfg)
+    eval_set_id = config.eval_set_id_of(cfg)
+    yaml_model = config.model_id_of(cfg)
+    yaml_bands = config.bands_of(cfg)
+    yaml_cycles = config.cycles_of(cfg)
+
     import torch
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
-    chip_index = n0_retrieval.load_chip_index()
-    eval_features = n0_retrieval.load_eval_features()
+    chip_index = n0_retrieval.load_chip_index(experiment_id)
+    eval_features = n0_retrieval.load_eval_features(eval_set_id)
     locations = n0_retrieval.chip_location_index(chip_index)
     n_chips = len(locations)
 
     gt_findable = n0_retrieval.build_ground_truth(chip_index, eval_features, findable_only=True)
     gt_strict = n0_retrieval.build_ground_truth(chip_index, eval_features, findable_only=False)
 
-    cycles = args.cycles or CYCLES
+    cycles = args.cycles or yaml_cycles
+    fallback_cycle = sorted(c["year"] for c in chip_index["cycles"])[-1]
     weights_manifest = json.loads(MODEL_WEIGHTS_MANIFEST.read_text())
 
     if args.ensemble and args.configs:
         raise SystemExit("--ensemble and --configs are mutually exclusive")
+
+    bands = args.bands or yaml_bands
 
     ensemble_members: list[str] | None = None
     if args.ensemble:
@@ -741,13 +793,12 @@ def main() -> None:
     elif args.configs:
         configs = [tuple(c.split("__")) for c in args.configs]
     else:
-        # default: just the production model on its production band (rgb).
-        # CIR or candidate models are opt-in via --configs / --ensemble.
-        configs = [(m, DEFAULT_BANDS_FOR_DEFAULT_CONFIGS) for m in models.model_ids()]
+        # default: the YAML's (model_id, bands)
+        configs = [(yaml_model, yaml_bands)]
 
     if ensemble_members:
         print(
-            f"=== N0 retrieval: ENSEMBLE {ensemble_members} / {args.bands} "
+            f"=== N0 retrieval: ENSEMBLE {ensemble_members} / {bands} "
             f"over {len(cycles)} cycles ==="
         )
     else:
@@ -761,30 +812,40 @@ def main() -> None:
     per_config: dict[str, dict] = {}
     t0 = time.time()
     if ensemble_members:
-        cfg_key = _ensemble_key(ensemble_members, args.bands)
+        # ensemble stays on the in-memory numpy path. The MVP has one
+        # registered model, so this code path is exercised only when the
+        # user has manually re-registered candidates and kept their .npy
+        # files. A DB-backed ensemble lands at R2 when multi-model is real.
+        cfg_key = _ensemble_key(ensemble_members, bands)
         combo_out = evaluate_ensemble(
-            member_model_ids=ensemble_members, bands=args.bands, cycles=cycles,
+            experiment_id=experiment_id, aoi_id=aoi_id, fallback_cycle=fallback_cycle,
+            member_model_ids=ensemble_members, bands=bands, cycles=cycles,
             concepts=queries.all_concepts(),
             gt_findable=gt_findable, gt_strict=gt_strict,
             locations=locations, device=device, weights_manifest=weights_manifest,
         )
         per_config[cfg_key] = combo_out
     else:
-        for model_id, bands in configs:
-            cfg_key = _config_key(model_id, bands)
-            weights_entry = weights_manifest["models"][model_id]
-            combo_out = evaluate_one_combo(
-                model_id=model_id, bands=bands, cycles=cycles,
-                concepts=queries.all_concepts(),
-                gt_findable=gt_findable, gt_strict=gt_strict,
-                locations=locations, device=device, weights_entry=weights_entry,
-            )
-            per_config[cfg_key] = combo_out
+        chip_loc_to_idx = n0_retrieval.chip_location_to_index_map(chip_index)
+        with vs_connect() as db_conn:
+            for model_id, b in configs:
+                cfg_key = _config_key(model_id, b)
+                weights_entry = weights_manifest["models"][model_id]
+                combo_out = evaluate_one_combo(
+                    experiment_id=experiment_id, aoi_id=aoi_id, fallback_cycle=fallback_cycle,
+                    model_id=model_id, bands=b, cycles=cycles,
+                    concepts=queries.all_concepts(),
+                    gt_findable=gt_findable, gt_strict=gt_strict,
+                    locations=locations, device=device, weights_entry=weights_entry,
+                    chip_loc_to_idx=chip_loc_to_idx, db_conn=db_conn,
+                )
+                per_config[cfg_key] = combo_out
     dt = time.time() - t0
 
     random_baseline = build_random_baseline(n_chips, gt_findable, gt_strict)
     results = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "experiment_id": experiment_id,
         "n_chips": n_chips,
         "cycles": cycles,
         "n_configs": len(per_config),
@@ -796,10 +857,11 @@ def main() -> None:
         },
         "elapsed_s": round(dt, 2),
     }
-    N0_RESULTS_JSON.parent.mkdir(parents=True, exist_ok=True)
-    N0_RESULTS_JSON.write_text(json.dumps(results, indent=2, default=str))
-    print(f"\nwrote {N0_RESULTS_JSON}")
-    write_markdown_report(results, gt_findable, gt_strict)
+    results_path = n0_results_json(experiment_id)
+    results_path.parent.mkdir(parents=True, exist_ok=True)
+    results_path.write_text(json.dumps(results, indent=2, default=str))
+    print(f"\nwrote {results_path}")
+    write_markdown_report(experiment_id, results, gt_findable, gt_strict)
 
 
 if __name__ == "__main__":

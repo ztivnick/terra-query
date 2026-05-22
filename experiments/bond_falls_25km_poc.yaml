@@ -1,0 +1,39 @@
+# Bond Falls 25 km^2 starting AOI (the MVP's gate area).
+#
+# This YAML is the single source of truth for the experiment.
+# To swap any value: edit here, then run
+#   uv run python -m terra_query.cli.run_experiment
+# Each pipeline stage is idempotent, so unchanged stages are no-ops.
+#
+# Loaded as a plain dict via yaml.safe_load; no schema validation.
+
+experiment_id: bond_falls_25km_poc
+
+# resolves to data/human_authored/aoi/<aoi_id>.geojson
+aoi_id: bond_falls_block
+
+# resolves to data/human_authored/eval/<eval_set_id>.geojson
+eval_set_id: known_features
+
+# must be a key in src/terra_query/embed/models.py:MODELS
+model_id: georsclip-vit-l-14-336
+
+# informational today; aerial is the only modality the pipeline reads
+modality: aerial
+
+# band combo to embed. "rgb" or "cir" today (see ingest.chips)
+bands: rgb
+
+# chip-grid geometry. ground footprint per chip + grid stride, both in meters
+chip_params:
+  chip_size_m: 224
+  stride_m: 112
+
+# NAIP cycles in the embedding sweep. trim this to iterate faster on a subset
+cycles:
+  - "2012"
+  - "2014"
+  - "2016"
+  - "2018"
+  - "2020"
+  - "2022"

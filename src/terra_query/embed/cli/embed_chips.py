@@ -3,18 +3,18 @@
 Idempotent. Skips a cell whose .npy + sidecar are already up to date
 relative to the chip index + the weights manifest entry.
 
-Defaults: the production model (`models.PRODUCTION_MODEL_ID`) on RGB
-across the 6 NAIP cycles. To run a candidate model or CIR, register the
-model in `embed.models.MODELS` and pass `--models <id>` / `--bands cir`.
+Defaults: the experiment YAML's `model_id` x `bands` x `cycles`. To
+sweep a candidate model, register it in `embed.models.MODELS` and pass
+`--models <id>`.
 
 Examples:
-  # production sweep (default): production model x rgb x 6 cycles
+  # production sweep (default): YAML model x YAML bands x YAML cycles
   python -m terra_query.embed.cli.embed_chips
   # just one cycle for a quick smoke test
   python -m terra_query.embed.cli.embed_chips --cycles 2022
   # one specific cell
   python -m terra_query.embed.cli.embed_chips \\
-      --models georsclip-vit-l-14-336 --bands rgb --cycles 2022
+      --models <some-registered-id> --bands rgb --cycles 2022
 """
 
 from __future__ import annotations
@@ -22,44 +22,40 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from pathlib import Path
 
-from terra_query.core.paths import CHIP_INDEX_JSON
+from terra_query.core import config
+from terra_query.core.paths import chip_index_json
 from terra_query.embed import models
 from terra_query.embed.embed_chips import DEFAULT_NUM_WORKERS, embed_cycles_for_combo
 
-# per-model MPS batch ceiling. ViT-L-14-336 has ~2.25x more transformer
-# tokens per image than the 224 variant; 16 keeps headroom on 32 GB unified
-# memory while staying GPU-saturated.
-BATCH_SIZE_BY_MODEL = {
-    "georsclip-vit-l-14-336": 16,
-}
-DEFAULT_BATCH_SIZE = 16
-
-ALL_CYCLES = ["2012", "2014", "2016", "2018", "2020", "2022"]
 ALL_BANDS = ["rgb", "cir"]
-DEFAULT_BANDS = ["rgb"]  # production embedding is RGB-only; CIR is opt-in
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Embed NAIP chips per (model, bands, cycle).")
     parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order.",
+    )
+    parser.add_argument(
         "--models",
         nargs="*",
         default=None,
-        help="Subset of model ids; default = the production model.",
+        help="Subset of model ids; default = the YAML model_id.",
     )
     parser.add_argument(
         "--bands",
         nargs="*",
         default=None,
         choices=ALL_BANDS,
-        help="Subset of band combos; default = rgb only.",
+        help="Subset of band combos; default = the YAML bands.",
     )
     parser.add_argument(
         "--cycles",
         nargs="*",
         default=None,
-        help='Subset of NAIP cycles (e.g. 2022) or "all"; default = all 6.',
+        help='Subset of cycles or "all"; default = the YAML cycles.',
     )
     parser.add_argument(
         "--force",
@@ -83,14 +79,23 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    targets_models = args.models or models.model_ids()
-    targets_bands = args.bands or DEFAULT_BANDS
-    if args.cycles is None or args.cycles == ["all"]:
-        targets_cycles = ALL_CYCLES
+    cfg = config.load_experiment(args.experiment)
+    experiment_id = config.experiment_id_of(cfg)
+    aoi_id = config.aoi_id_of(cfg)
+    yaml_model = config.model_id_of(cfg)
+    yaml_bands = config.bands_of(cfg)
+    yaml_cycles = config.cycles_of(cfg)
+
+    targets_models = args.models or [yaml_model]
+    targets_bands = args.bands or [yaml_bands]
+    if args.cycles is None:
+        targets_cycles = yaml_cycles
+    elif args.cycles == ["all"]:
+        targets_cycles = yaml_cycles
     else:
         targets_cycles = list(args.cycles)
 
-    idx = json.loads(CHIP_INDEX_JSON.read_text())
+    idx = json.loads(chip_index_json(experiment_id).read_text())
     available_years = {c["year"] for c in idx["cycles"]}
     bad = [y for y in targets_cycles if y not in available_years]
     if bad:
@@ -110,10 +115,10 @@ def main() -> None:
     sidecars: list[dict] = []
     for m in targets_models:
         for b in targets_bands:
-            batch = args.batch_size or BATCH_SIZE_BY_MODEL.get(m, DEFAULT_BATCH_SIZE)
+            batch = args.batch_size or models.spec(m).mps_batch_size
             try:
                 scs = embed_cycles_for_combo(
-                    targets_cycles, m, b,
+                    experiment_id, aoi_id, targets_cycles, m, b,
                     batch_size=batch, force=args.force,
                     num_workers=args.num_workers,
                 )

@@ -6,10 +6,12 @@ AOI polygon and all eval points. Updating the `findable_aerial` flag
 itself is done out-of-band after visual inspection of the chips.
 
     uv run python -m terra_query.eval.review
+    uv run python -m terra_query.eval.review --experiment /path/to/cfg.yaml
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -19,25 +21,33 @@ import rasterio
 from PIL import Image, ImageDraw, ImageFont
 from rasterio.windows import Window
 
+from terra_query.core import config
 from terra_query.core.paths import (
-    AOI_26916,
-    EVAL_26916,
-    EVAL_CHIPS_DIR,
-    NAIP_DIR,
-    OVERLAY_PNG,
     REPO_ROOT,
+    aoi_26916,
+    eval_26916,
     eval_chip,
+    eval_chips_dir,
+    naip_cog,
+    naip_manifest,
+    overlay_png,
 )
 
 CHIP_HALF_M = 100.0  # 200 m x 200 m chip per feature
 CHIP_DISPLAY_PX = 400  # output PNG width, nearest-neighbor scaled
 
 
-def latest_naip_path() -> Path:
-    cogs = sorted(NAIP_DIR.glob("*/naip_bondfalls_*_26916.tif"))
-    if not cogs:
-        raise RuntimeError("no NAIP COGs found")
-    return cogs[-1]
+def latest_naip_cycle(aoi_id: str) -> tuple[str, Path]:
+    """Return (year, cog_path) for the latest NAIP cycle in this AOI's manifest."""
+    manifest = json.loads(naip_manifest(aoi_id).read_text())
+    years = sorted(c["year"] for c in manifest["cycles"])
+    if not years:
+        raise RuntimeError(f"no NAIP cycles in manifest for aoi {aoi_id}")
+    latest = years[-1]
+    cog = naip_cog(aoi_id, latest)
+    if not cog.exists():
+        raise RuntimeError(f"NAIP COG missing for {aoi_id}/{latest}: {cog}")
+    return latest, cog
 
 
 def _stretch_uint8(arr: np.ndarray) -> np.ndarray:
@@ -94,7 +104,7 @@ def render_chip(ds, x: float, y: float, out_path: Path, label: str) -> None:
 
 
 def render_overlay(
-    naip_path: Path, aoi_26916: dict, eval_26916: dict, out_path: Path
+    naip_path: Path, aoi_26916_fc: dict, eval_26916_fc: dict, out_path: Path
 ) -> None:
     with rasterio.open(naip_path) as ds:
         scale = 6
@@ -112,12 +122,12 @@ def render_overlay(
             return (x - bounds.left) / px_x, (bounds.top - y) / px_y
 
     draw = ImageDraw.Draw(img)
-    aoi_ring = aoi_26916["features"][0]["geometry"]["coordinates"][0]
+    aoi_ring = aoi_26916_fc["features"][0]["geometry"]["coordinates"][0]
     px_ring = [xy_to_px(x, y) for x, y in aoi_ring]
     draw.line(px_ring, fill="yellow", width=3)
 
     font = ImageFont.load_default()
-    for feat in eval_26916["features"]:
+    for feat in eval_26916_fc["features"]:
         x, y = feat["geometry"]["coordinates"]
         cx, cy = xy_to_px(x, y)
         cat = feat["properties"]["category"]
@@ -142,24 +152,36 @@ def sample_at_point(ds, x: float, y: float) -> list[int] | None:
 
 
 def main() -> int:
-    naip_path = latest_naip_path()
-    print(f"Using latest NAIP: {naip_path.relative_to(REPO_ROOT)}")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order.",
+    )
+    args = parser.parse_args()
+    cfg = config.load_experiment(args.experiment)
+    experiment_id = config.experiment_id_of(cfg)
+    aoi_id = config.aoi_id_of(cfg)
+    eval_set_id = config.eval_set_id_of(cfg)
 
-    aoi_26916_fc = json.loads(AOI_26916.read_text())
-    eval_26916_fc = json.loads(EVAL_26916.read_text())
+    latest_year, naip_path = latest_naip_cycle(aoi_id)
+    print(f"Using latest NAIP cycle {latest_year}: {naip_path.relative_to(REPO_ROOT)}")
 
-    EVAL_CHIPS_DIR.mkdir(parents=True, exist_ok=True)
+    aoi_26916_fc = json.loads(aoi_26916(aoi_id).read_text())
+    eval_26916_fc = json.loads(eval_26916(eval_set_id).read_text())
+
+    eval_chips_dir(eval_set_id).mkdir(parents=True, exist_ok=True)
     with rasterio.open(naip_path) as ds:
         for feat in eval_26916_fc["features"]:
             fid = feat["properties"]["id"]
             x, y = feat["geometry"]["coordinates"]
-            chip_path = eval_chip(fid)
+            chip_path = eval_chip(eval_set_id, fid)
             render_chip(ds, x, y, chip_path, fid)
             sample = sample_at_point(ds, x, y)
             print(f"  {fid}: chip={chip_path.relative_to(REPO_ROOT)} sample={sample}")
 
-    render_overlay(naip_path, aoi_26916_fc, eval_26916_fc, OVERLAY_PNG)
-    print(f"Overlay: {OVERLAY_PNG.relative_to(REPO_ROOT)}")
+    overlay_out = overlay_png(experiment_id)
+    render_overlay(naip_path, aoi_26916_fc, eval_26916_fc, overlay_out)
+    print(f"Overlay: {overlay_out.relative_to(REPO_ROOT)}")
     return 0
 
 

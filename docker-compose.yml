@@ -1,0 +1,23 @@
+services:
+  db:
+    build:
+      context: ./infra/postgres
+    image: terra-query-db:local
+    container_name: terra-query-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: terra
+      POSTGRES_PASSWORD: terra
+      POSTGRES_DB: terra_query
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U terra -d terra_query"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:

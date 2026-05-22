@@ -1,24 +1,27 @@
 """STAC discovery + cycle selection for aerial ingest.
 
-Lists available NAIP cycles and Sentinel-2 winter scenes for the AOI,
-prints a summary, and writes per-source manifest files with the picks.
-No downloads happen here. Run once via:
+Lists available NAIP cycles and Sentinel-2 winter scenes for the AOI
+(resolved via the experiment config's `aoi_id`), prints a summary, and
+writes per-source manifests with the picks. No downloads happen here.
 
     uv run python -m terra_query.ingest.cli.discover_aerial
+    uv run python -m terra_query.ingest.cli.discover_aerial --experiment /path/to/cfg.yaml
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from terra_query.core import config
 from terra_query.core.paths import (
-    AOI_WGS84,
-    NAIP_MANIFEST,
     REPO_ROOT,
-    S2_MANIFEST,
+    aoi_wgs84,
+    naip_manifest,
+    s2_manifest,
 )
 from terra_query.ingest.aerial import (
     NAIP_COLLECTION,
@@ -169,11 +172,24 @@ def _write_s2_manifest(path: Path, picks: list[StacPick]) -> None:
 
 
 def main() -> None:
-    aoi = json.loads(AOI_WGS84.read_text())
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order.",
+    )
+    args = parser.parse_args()
+    cfg = config.load_experiment(args.experiment)
+    aoi_id = config.aoi_id_of(cfg)
+
+    aoi = json.loads(aoi_wgs84(aoi_id).read_text())
     bbox = aoi_bounds_wgs84(aoi)
+    print(f"AOI id: {aoi_id}")
     print(f"AOI WGS84 bbox: ({bbox[0]:.4f}, {bbox[1]:.4f}, {bbox[2]:.4f}, {bbox[3]:.4f})")
     print(f"STAC endpoint: {PC_STAC_URL}")
     print()
+
+    naip_manifest_path = naip_manifest(aoi_id)
+    s2_manifest_path = s2_manifest(aoi_id)
 
     print(f"[NAIP] searching {NAIP_COLLECTION}...")
     naip = search_naip(bbox)
@@ -187,8 +203,8 @@ def main() -> None:
     naip_picked = pick_naip_cycles(years_sorted, NAIP_CYCLES_TO_PICK)
     print(f"  picked cycles: {naip_picked}")
     naip_picked_items = [p for p in naip if _year(p.datetime) in naip_picked]
-    _write_naip_manifest(NAIP_MANIFEST, naip_picked_items, naip_picked)
-    print(f"  wrote {NAIP_MANIFEST.relative_to(REPO_ROOT)}")
+    _write_naip_manifest(naip_manifest_path, naip_picked_items, naip_picked)
+    print(f"  wrote {naip_manifest_path.relative_to(REPO_ROOT)}")
     print()
 
     print(f"[S2] searching {S2_COLLECTION} (winter, cloud<{20})...")
@@ -206,8 +222,8 @@ def main() -> None:
     print(f"  picked scenes:")
     for p in s2_picked:
         print(f"    {p.datetime} cloud={p.cloud_cover:.1f}% id={p.item_id}")
-    _write_s2_manifest(S2_MANIFEST, s2_picked)
-    print(f"  wrote {S2_MANIFEST.relative_to(REPO_ROOT)}")
+    _write_s2_manifest(s2_manifest_path, s2_picked)
+    print(f"  wrote {s2_manifest_path.relative_to(REPO_ROOT)}")
 
 
 if __name__ == "__main__":

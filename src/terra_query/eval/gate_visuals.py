@@ -10,10 +10,12 @@ Renders artifacts that prove the gate's manual-check items without QGIS:
      mosaicked raster (not just a chip crop).
 
     uv run python -m terra_query.eval.gate_visuals
+    uv run python -m terra_query.eval.gate_visuals --experiment /path/to/cfg.yaml
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -23,7 +25,18 @@ import rasterio
 from PIL import Image, ImageDraw, ImageFont
 from rasterio.windows import from_bounds
 
-from terra_query.core.paths import EVAL_26916, GATE_DIR, naip_cog, s2_cog
+from terra_query.core import config
+from terra_query.core.paths import (
+    cross_cycle_png,
+    dam_on_dam_png,
+    eval_26916,
+    gate_dir,
+    naip_cog,
+    naip_manifest,
+    s2_manifest,
+    s2_cog,
+    s2_rgb_png,
+)
 
 
 def _stretch_uint8(arr: np.ndarray) -> np.ndarray:
@@ -83,37 +96,44 @@ def _read_window_rgb(naip_path: Path, x: float, y: float, half_m: float) -> Imag
     return Image.fromarray(stretched)
 
 
-def render_cross_cycle(out_path: Path) -> None:
-    """2012 vs 2022 NAIP side-by-side, 500 m around Bond Falls."""
-    eval_fc = json.loads(EVAL_26916.read_text())
+def _naip_years(aoi_id: str) -> list[str]:
+    manifest = json.loads(naip_manifest(aoi_id).read_text())
+    return sorted(c["year"] for c in manifest["cycles"])
+
+
+def render_cross_cycle(eval_set_id: str, aoi_id: str, out_path: Path) -> None:
+    """Oldest-vs-latest NAIP side-by-side, 500 m around Bond Falls."""
+    eval_fc = json.loads(eval_26916(eval_set_id).read_text())
     fx, fy = _bond_falls_xy_26916(eval_fc)
 
-    img_2012 = _read_window_rgb(naip_cog("2012"), fx, fy, 500)
-    img_2022 = _read_window_rgb(naip_cog("2022"), fx, fy, 500)
+    years = _naip_years(aoi_id)
+    earliest, latest = years[0], years[-1]
+    img_a = _read_window_rgb(naip_cog(aoi_id, earliest), fx, fy, 500)
+    img_b = _read_window_rgb(naip_cog(aoi_id, latest), fx, fy, 500)
 
     # equalise output sizes
     target_h = 500
-    img_2012 = img_2012.resize(
-        (int(img_2012.width * target_h / img_2012.height), target_h), Image.LANCZOS
+    img_a = img_a.resize(
+        (int(img_a.width * target_h / img_a.height), target_h), Image.LANCZOS
     )
-    img_2022 = img_2022.resize(
-        (int(img_2022.width * target_h / img_2022.height), target_h), Image.LANCZOS
+    img_b = img_b.resize(
+        (int(img_b.width * target_h / img_b.height), target_h), Image.LANCZOS
     )
 
     pad = 12
     label_h = 24
-    total_w = img_2012.width + img_2022.width + 3 * pad
+    total_w = img_a.width + img_b.width + 3 * pad
     total_h = target_h + label_h + 2 * pad
     canvas = Image.new("RGB", (total_w, total_h), (24, 24, 24))
-    canvas.paste(img_2012, (pad, pad + label_h))
-    canvas.paste(img_2022, (img_2012.width + 2 * pad, pad + label_h))
+    canvas.paste(img_a, (pad, pad + label_h))
+    canvas.paste(img_b, (img_a.width + 2 * pad, pad + label_h))
 
     draw = ImageDraw.Draw(canvas)
     font = ImageFont.load_default()
-    draw.text((pad, 6), "NAIP 2012 (1.0 m)", fill="white", font=font)
+    draw.text((pad, 6), f"NAIP {earliest}", fill="white", font=font)
     draw.text(
-        (img_2012.width + 2 * pad, 6),
-        "NAIP 2022 (0.6 m)",
+        (img_a.width + 2 * pad, 6),
+        f"NAIP {latest}",
         fill="white",
         font=font,
     )
@@ -121,9 +141,9 @@ def render_cross_cycle(out_path: Path) -> None:
     canvas.save(out_path)
 
 
-def render_s2_rgb(scene_dir_name: str, out_path: Path) -> None:
+def render_s2_rgb(aoi_id: str, date_str: str, out_path: Path) -> None:
     """Render full-AOI S2 RGB (B04/B03/B02) for one scene."""
-    scene_path = s2_cog(scene_dir_name)
+    scene_path = s2_cog(aoi_id, date_str)
     with rasterio.open(scene_path) as ds:
         # bands stored as B02 B03 B04 B08 B11 (positions 1..5)
         # RGB = R(B04 -> 3), G(B03 -> 2), B(B02 -> 1)
@@ -139,7 +159,7 @@ def render_s2_rgb(scene_dir_name: str, out_path: Path) -> None:
     draw.rectangle([(0, 0), (img.width, 22)], fill=(0, 0, 0))
     draw.text(
         (6, 4),
-        f"Sentinel-2 RGB (B04/B03/B02), {scene_dir_name}, full AOI",
+        f"Sentinel-2 RGB (B04/B03/B02), {date_str}, full AOI",
         fill="white",
         font=font,
     )
@@ -147,11 +167,12 @@ def render_s2_rgb(scene_dir_name: str, out_path: Path) -> None:
     img.save(out_path)
 
 
-def render_dam_on_dam(out_path: Path) -> None:
-    """Render NAIP 2022 around the dam point with a marker on the dam coord."""
-    eval_fc = json.loads(EVAL_26916.read_text())
+def render_dam_on_dam(eval_set_id: str, aoi_id: str, out_path: Path) -> None:
+    """Render latest NAIP around the dam point with a marker on the dam coord."""
+    eval_fc = json.loads(eval_26916(eval_set_id).read_text())
     dx, dy = _dam_xy_26916(eval_fc)
-    img = _read_window_rgb(naip_cog("2022"), dx, dy, 200)
+    latest = _naip_years(aoi_id)[-1]
+    img = _read_window_rgb(naip_cog(aoi_id, latest), dx, dy, 200)
     img = img.resize((600, 600), Image.LANCZOS)
     draw = ImageDraw.Draw(img)
     cx, cy = img.width // 2, img.height // 2
@@ -162,7 +183,7 @@ def render_dam_on_dam(out_path: Path) -> None:
     font = ImageFont.load_default()
     draw.text(
         (6, 4),
-        "NAIP 2022 around bond-falls-main-dam point (S2 dam-on-dam check)",
+        f"NAIP {latest} around bond-falls-main-dam point",
         fill="white",
         font=font,
     )
@@ -171,14 +192,33 @@ def render_dam_on_dam(out_path: Path) -> None:
 
 
 def main() -> int:
-    GATE_DIR.mkdir(parents=True, exist_ok=True)
-    render_cross_cycle(GATE_DIR / "cross_cycle_falls.png")
-    print(f"wrote {GATE_DIR / 'cross_cycle_falls.png'}")
-    for date_str in ("2025-03-03", "2026-01-12"):
-        render_s2_rgb(date_str, GATE_DIR / f"s2_{date_str}_rgb.png")
-        print(f"wrote {GATE_DIR / f's2_{date_str}_rgb.png'}")
-    render_dam_on_dam(GATE_DIR / "dam_on_dam.png")
-    print(f"wrote {GATE_DIR / 'dam_on_dam.png'}")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order.",
+    )
+    args = parser.parse_args()
+    cfg = config.load_experiment(args.experiment)
+    experiment_id = config.experiment_id_of(cfg)
+    aoi_id = config.aoi_id_of(cfg)
+    eval_set_id = config.eval_set_id_of(cfg)
+
+    gate_dir(experiment_id).mkdir(parents=True, exist_ok=True)
+
+    cc_path = cross_cycle_png(experiment_id)
+    render_cross_cycle(eval_set_id, aoi_id, cc_path)
+    print(f"wrote {cc_path}")
+
+    manifest = json.loads(s2_manifest(aoi_id).read_text())
+    for scene in manifest["scenes"]:
+        date_str = scene["datetime"][:10]
+        out = s2_rgb_png(experiment_id, date_str)
+        render_s2_rgb(aoi_id, date_str, out)
+        print(f"wrote {out}")
+
+    dd_path = dam_on_dam_png(experiment_id)
+    render_dam_on_dam(eval_set_id, aoi_id, dd_path)
+    print(f"wrote {dd_path}")
     return 0
 
 

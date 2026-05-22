@@ -6,10 +6,10 @@ four top-level buckets. The buckets are organized by **provenance**
 
 | bucket | what's here | regenerable? | git |
 |---|---|---|---|
-| `human_authored/` | hand-curated, project-defining content. Written by a person, never recreated by code. | no | tracked (small) |
-| `source_downloads/` | content pulled verbatim from external sources. | yes - rerun the matching ingest CLI | large blobs ignored; manifests / indexes tracked |
-| `pipeline_outputs/` | content produced by this project's code from `human_authored/` + `source_downloads/`. | yes - rerun the pipeline | mostly ignored |
-| `verification/` | eyeball-check artifacts and per-run logs that exist for confirming the pipeline is doing the right thing. | yes - regenerable on demand | small enough to track |
+| `human_authored/` | hand-curated, project-defining content. Written by a person, never recreated by code. | no | tracked |
+| `source_downloads/` | content pulled verbatim from external sources. | yes - rerun the matching ingest CLI | large blobs (.tif, weights) ignored; STAC manifests tracked |
+| `pipeline_outputs/` | content produced by this project's code from `human_authored/` + `source_downloads/`. | yes - rerun the pipeline | per-experiment outputs ignored; the small reprojected `aoi/`, `eval/` geojsons stay tracked |
+| `verification/` | eyeball-check artifacts and per-run logs that exist for confirming the pipeline is doing the right thing. | yes - regen on demand | text reports / logs tracked; PNG visuals ignored (recursive glob) |
 
 The names describe provenance, not file type. A GeoJSON belongs in
 `human_authored/` if a person authored it, in `pipeline_outputs/` if a

@@ -1,18 +1,23 @@
 """Reproject the human-authored AOI + eval set into the working CRS.
 
-Reads the AOI + eval set from `human_authored/`, writes their 26916
+Reads the AOI + eval set from `human_authored/` (resolved via the
+experiment config's `aoi_id` / `eval_set_id`), writes their 26916
 counterparts to `pipeline_outputs/`, and a verification report to
 `verification/`. Idempotent: rerunning produces byte-identical output.
 
     uv run python -m terra_query.ingest.cli.reproject_inputs
+    uv run python -m terra_query.ingest.cli.reproject_inputs --experiment /path/to/cfg.yaml
 """
 
 from __future__ import annotations
 
+import argparse
 import json
+from pathlib import Path
 
 from shapely.geometry import Polygon
 
+from terra_query.core import config
 from terra_query.core.crs import (
     WORKING_CRS,
     WORKING_CRS_EPSG,
@@ -22,12 +27,12 @@ from terra_query.core.crs import (
     to_working,
 )
 from terra_query.core.paths import (
-    AOI_26916,
-    AOI_WGS84,
     CRS_VERIFICATION,
-    EVAL_26916,
-    EVAL_WGS84,
     REPO_ROOT,
+    aoi_26916,
+    aoi_wgs84,
+    eval_26916,
+    eval_wgs84,
 )
 
 CRS_BLOCK_26916 = {
@@ -123,6 +128,8 @@ def write_report(
     max_err: float,
     n_vert: int,
     n_pts: int,
+    aoi_id: str,
+    eval_set_id: str,
 ) -> str:
     aou = area_of_use_bounds()
     aoi_target_area_km2 = 25.0  # what the human-authored AOI was sized to
@@ -131,6 +138,8 @@ def write_report(
         "terra-query working CRS verification\n"
         "====================================\n"
         "\n"
+        f"AOI id                      : {aoi_id}\n"
+        f"Eval-set id                 : {eval_set_id}\n"
         f"Pinned CRS                  : {WORKING_CRS} (NAD83 / UTM Zone 16N, meters)\n"
         "\n"
         f"Area of use (WGS84 W,S,E,N) : {aou}\n"
@@ -147,8 +156,8 @@ def write_report(
         f"Max coordinate error        : {max_err:.2e} deg (tolerance 1e-7)\n"
         "\n"
         "Artifacts:\n"
-        f"- {AOI_26916.relative_to(REPO_ROOT)}\n"
-        f"- {EVAL_26916.relative_to(REPO_ROOT)}\n"
+        f"- {aoi_26916(aoi_id).relative_to(REPO_ROOT)}\n"
+        f"- {eval_26916(eval_set_id).relative_to(REPO_ROOT)}\n"
     )
     CRS_VERIFICATION.parent.mkdir(parents=True, exist_ok=True)
     CRS_VERIFICATION.write_text(text)
@@ -156,20 +165,32 @@ def write_report(
 
 
 def main() -> None:
-    fc_aoi = json.loads(AOI_WGS84.read_text())
-    fc_eval = json.loads(EVAL_WGS84.read_text())
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order.",
+    )
+    args = parser.parse_args()
+    cfg = config.load_experiment(args.experiment)
+    aoi_id = config.aoi_id_of(cfg)
+    eval_set_id = config.eval_set_id_of(cfg)
+
+    fc_aoi = json.loads(aoi_wgs84(aoi_id).read_text())
+    fc_eval = json.loads(eval_wgs84(eval_set_id).read_text())
 
     out_aoi, area_m2, bbox_proj = reproject_aoi(fc_aoi)
     out_eval = reproject_eval(fc_eval)
     err, n_vert, n_pts = max_round_trip(fc_aoi, fc_eval)
     bbox_wgs = aoi_bbox_wgs84(fc_aoi)
 
-    AOI_26916.parent.mkdir(parents=True, exist_ok=True)
-    EVAL_26916.parent.mkdir(parents=True, exist_ok=True)
-    AOI_26916.write_text(json.dumps(out_aoi, indent=2) + "\n")
-    EVAL_26916.write_text(json.dumps(out_eval, indent=2) + "\n")
+    aoi_out = aoi_26916(aoi_id)
+    eval_out = eval_26916(eval_set_id)
+    aoi_out.parent.mkdir(parents=True, exist_ok=True)
+    eval_out.parent.mkdir(parents=True, exist_ok=True)
+    aoi_out.write_text(json.dumps(out_aoi, indent=2) + "\n")
+    eval_out.write_text(json.dumps(out_eval, indent=2) + "\n")
 
-    print(write_report(bbox_wgs, bbox_proj, area_m2, err, n_vert, n_pts))
+    print(write_report(bbox_wgs, bbox_proj, area_m2, err, n_vert, n_pts, aoi_id, eval_set_id))
 
 
 if __name__ == "__main__":

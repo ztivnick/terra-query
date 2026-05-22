@@ -20,8 +20,8 @@ from pathlib import Path
 from torch.utils.data import Dataset
 
 from terra_query.core.paths import (
-    CHIP_INDEX_JSON,
     MODEL_WEIGHTS_MANIFEST,
+    chip_index_json,
     embeddings_json,
     embeddings_npy,
     naip_cog,
@@ -71,8 +71,8 @@ def embed_one_chip(chip_record: dict, cog_path: Path, bands: str, model, preproc
     return encoder.encode_image(model, preprocess, arr, device)
 
 
-def _load_chip_index() -> dict:
-    return json.loads(CHIP_INDEX_JSON.read_text())
+def _load_chip_index(experiment_id: str) -> dict:
+    return json.loads(chip_index_json(experiment_id).read_text())
 
 
 def _get_cycle_block(chip_index: dict, year: str) -> dict:
@@ -82,7 +82,7 @@ def _get_cycle_block(chip_index: dict, year: str) -> dict:
     raise KeyError(f"cycle {year!r} not in chip index (have: {[c['year'] for c in chip_index['cycles']]})")
 
 
-def _chip_index_checksum() -> str:
+def _chip_index_checksum(experiment_id: str) -> str:
     """SHA256 of the EMBEDDING-RELEVANT parts of the chip index.
 
     Excludes `generated_at` (timestamp, changes every regen) and
@@ -93,17 +93,24 @@ def _chip_index_checksum() -> str:
     """
     import hashlib
 
-    idx = json.loads(CHIP_INDEX_JSON.read_text())
+    idx = json.loads(chip_index_json(experiment_id).read_text())
     # build a canonical embedding-relevant subset
     relevant = {k: v for k, v in idx.items() if k not in ("generated_at", "eval_lookup")}
     blob = json.dumps(relevant, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def _is_up_to_date(model_id: str, bands: str, cycle: str, weights_entry: dict, index_sha: str) -> dict | None:
+def _is_up_to_date(
+    experiment_id: str,
+    model_id: str,
+    bands: str,
+    cycle: str,
+    weights_entry: dict,
+    index_sha: str,
+) -> dict | None:
     """Return the existing sidecar dict if this cell is up to date, else None."""
-    out_npy = embeddings_npy(model_id, bands, cycle)
-    out_json = embeddings_json(model_id, bands, cycle)
+    out_npy = embeddings_npy(experiment_id, model_id, bands, cycle)
+    out_json = embeddings_json(experiment_id, model_id, bands, cycle)
     if not (out_npy.exists() and out_json.exists()):
         return None
     prev = json.loads(out_json.read_text())
@@ -146,6 +153,8 @@ class _ChipDataset(Dataset):
 
 
 def _embed_cycle_with_model(
+    experiment_id: str,
+    aoi_id: str,
     cycle: str,
     model_id: str,
     bands: str,
@@ -168,7 +177,7 @@ def _embed_cycle_with_model(
     from torch.utils.data import DataLoader
 
     cycle_block = _get_cycle_block(chip_index, cycle)
-    cog = naip_cog(cycle)
+    cog = naip_cog(aoi_id, cycle)
     if not cog.exists():
         raise FileNotFoundError(f"NAIP COG missing for cycle {cycle}: {cog}")
 
@@ -218,8 +227,8 @@ def _embed_cycle_with_model(
         f"non-unit row norms: min={norms.min()}, max={norms.max()}"
     )
 
-    out_npy = embeddings_npy(model_id, bands, cycle)
-    out_json = embeddings_json(model_id, bands, cycle)
+    out_npy = embeddings_npy(experiment_id, model_id, bands, cycle)
+    out_json = embeddings_json(experiment_id, model_id, bands, cycle)
     out_npy.parent.mkdir(parents=True, exist_ok=True)
     np.save(out_npy, embeddings)
 
@@ -256,6 +265,8 @@ def _embed_cycle_with_model(
 
 
 def embed_cycle(
+    experiment_id: str,
+    aoi_id: str,
     cycle: str,
     model_id: str,
     bands: str,
@@ -271,13 +282,13 @@ def embed_cycle(
     """
     import torch
 
-    chip_index = _load_chip_index()
-    index_sha = _chip_index_checksum()
+    chip_index = _load_chip_index(experiment_id)
+    index_sha = _chip_index_checksum(experiment_id)
     weights_manifest = json.loads(MODEL_WEIGHTS_MANIFEST.read_text())
     weights_entry = weights_manifest["models"][model_id]
 
     if not force:
-        prev = _is_up_to_date(model_id, bands, cycle, weights_entry, index_sha)
+        prev = _is_up_to_date(experiment_id, model_id, bands, cycle, weights_entry, index_sha)
         if prev is not None:
             print(f"[{model_id}/{bands}/{cycle}] up to date; skipping.")
             return prev
@@ -296,7 +307,7 @@ def embed_cycle(
 
     try:
         sidecar = _embed_cycle_with_model(
-            cycle, model_id, bands, model, preprocess, device,
+            experiment_id, aoi_id, cycle, model_id, bands, model, preprocess, device,
             weights_entry, index_sha, chip_index, batch_size, num_workers,
         )
     finally:
@@ -307,6 +318,8 @@ def embed_cycle(
 
 
 def embed_cycles_for_combo(
+    experiment_id: str,
+    aoi_id: str,
     cycles: list[str],
     model_id: str,
     bands: str,
@@ -322,8 +335,8 @@ def embed_cycles_for_combo(
     """
     import torch
 
-    chip_index = _load_chip_index()
-    index_sha = _chip_index_checksum()
+    chip_index = _load_chip_index(experiment_id)
+    index_sha = _chip_index_checksum(experiment_id)
     weights_manifest = json.loads(MODEL_WEIGHTS_MANIFEST.read_text())
     weights_entry = weights_manifest["models"][model_id]
 
@@ -334,7 +347,7 @@ def embed_cycles_for_combo(
         if force:
             to_do.append(cycle)
             continue
-        prev = _is_up_to_date(model_id, bands, cycle, weights_entry, index_sha)
+        prev = _is_up_to_date(experiment_id, model_id, bands, cycle, weights_entry, index_sha)
         if prev is not None:
             print(f"[{model_id}/{bands}/{cycle}] up to date; skipping.")
             sidecars.append(prev)
@@ -359,7 +372,7 @@ def embed_cycles_for_combo(
     try:
         for cycle in to_do:
             sc = _embed_cycle_with_model(
-                cycle, model_id, bands, model, preprocess, device,
+                experiment_id, aoi_id, cycle, model_id, bands, model, preprocess, device,
                 weights_entry, index_sha, chip_index, batch_size, num_workers,
             )
             sidecars.append(sc)

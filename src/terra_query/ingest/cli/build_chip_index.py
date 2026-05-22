@@ -3,24 +3,30 @@
 Idempotent: each output gets regenerated only if it is missing or older than
 its inputs. Re-run safely after a NAIP refresh, an eval-set edit, or a code
 change.
+
+    uv run python -m terra_query.ingest.cli.build_chip_index
+    uv run python -m terra_query.ingest.cli.build_chip_index --force
+    uv run python -m terra_query.ingest.cli.build_chip_index --experiment /path/to/cfg.yaml
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
 from shapely.geometry import shape
 
+from terra_query.core import config
 from terra_query.core.paths import (
-    AOI_26916,
-    CHIP_EVAL_DIR,
-    CHIP_GRID_OVERVIEW_PNG,
-    CHIP_INDEX_JSON,
-    EVAL_26916,
-    NAIP_MANIFEST,
+    aoi_26916,
     chip_eval,
+    chip_eval_dir,
+    chip_grid_overview_png,
+    chip_index_json,
+    eval_26916,
     naip_cog,
+    naip_manifest,
 )
 from terra_query.ingest.chips import (
     ChipBox,
@@ -28,8 +34,6 @@ from terra_query.ingest.chips import (
     render_chip_grid_overview,
     render_eval_chip_png,
 )
-
-OVERVIEW_CYCLE = "2022"  # latest NAIP cycle used for visual artifacts
 
 
 def _newer(a: Path, b: Path) -> bool:
@@ -39,19 +43,19 @@ def _newer(a: Path, b: Path) -> bool:
     return a.stat().st_mtime < b.stat().st_mtime
 
 
-def _load_inputs():
-    aoi_gj = json.loads(AOI_26916.read_text())
+def _load_inputs(aoi_id: str, eval_set_id: str):
+    aoi_gj = json.loads(aoi_26916(aoi_id).read_text())
     aoi_poly = shape(aoi_gj["features"][0]["geometry"])
     aoi_ring = aoi_gj["features"][0]["geometry"]["coordinates"][0]
 
-    ev_gj = json.loads(EVAL_26916.read_text())
+    ev_gj = json.loads(eval_26916(eval_set_id).read_text())
     ev_pts: list[tuple[str, tuple[float, float]]] = []
     for f in ev_gj["features"]:
         x, y = f["geometry"]["coordinates"]
         ev_pts.append((f["properties"]["id"], (float(x), float(y))))
 
-    manifest = json.loads(NAIP_MANIFEST.read_text())
-    cycle_cogs = [(c["year"], naip_cog(c["year"])) for c in manifest["cycles"]]
+    manifest = json.loads(naip_manifest(aoi_id).read_text())
+    cycle_cogs = [(c["year"], naip_cog(aoi_id, c["year"])) for c in manifest["cycles"]]
 
     # AOI bounds in 26916
     xs = [p[0] for p in aoi_ring]
@@ -67,17 +71,37 @@ def _load_inputs():
     return aoi_poly, aoi_ring, ev_pts, cycle_cogs, aoi_bounds, buffered
 
 
-def _newest_input_mtime(cycle_cogs: list[tuple[str, Path]]) -> float:
-    inputs = [AOI_26916, EVAL_26916, NAIP_MANIFEST] + [c for _, c in cycle_cogs]
+def _newest_input_mtime(
+    aoi_id: str,
+    eval_set_id: str,
+    cycle_cogs: list[tuple[str, Path]],
+) -> float:
+    inputs = [
+        aoi_26916(aoi_id),
+        eval_26916(eval_set_id),
+        naip_manifest(aoi_id),
+    ] + [c for _, c in cycle_cogs]
     return max(p.stat().st_mtime for p in inputs)
 
 
-def build_index_if_stale(force: bool = False) -> dict:
-    aoi_poly, _aoi_ring, ev_pts, cycle_cogs, aoi_bounds, buffered = _load_inputs()
+def build_index_if_stale(
+    experiment_id: str,
+    aoi_id: str,
+    eval_set_id: str,
+    chip_size_m: int,
+    stride_m: int,
+    force: bool = False,
+) -> dict:
+    aoi_poly, _aoi_ring, ev_pts, cycle_cogs, aoi_bounds, buffered = _load_inputs(
+        aoi_id, eval_set_id,
+    )
 
-    rebuild = force or not CHIP_INDEX_JSON.exists()
+    out_path = chip_index_json(experiment_id)
+    rebuild = force or not out_path.exists()
     if not rebuild:
-        rebuild = CHIP_INDEX_JSON.stat().st_mtime < _newest_input_mtime(cycle_cogs)
+        rebuild = out_path.stat().st_mtime < _newest_input_mtime(
+            aoi_id, eval_set_id, cycle_cogs,
+        )
 
     if rebuild:
         idx = assemble_chip_index(
@@ -86,13 +110,15 @@ def build_index_if_stale(force: bool = False) -> dict:
             naip_cycle_cogs=cycle_cogs,
             aoi_bounds_26916=aoi_bounds,
             aoi_buffered_bounds_26916=buffered,
+            chip_size_m=chip_size_m,
+            stride_m=stride_m,
         )
-        CHIP_INDEX_JSON.parent.mkdir(parents=True, exist_ok=True)
-        CHIP_INDEX_JSON.write_text(json.dumps(idx, indent=2))
-        print(f"wrote {CHIP_INDEX_JSON} ({sum(len(c['chips']) for c in idx['cycles'])} chips)")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(idx, indent=2))
+        print(f"wrote {out_path} ({sum(len(c['chips']) for c in idx['cycles'])} chips)")
     else:
-        idx = json.loads(CHIP_INDEX_JSON.read_text())
-        print(f"chip index up to date: {CHIP_INDEX_JSON}")
+        idx = json.loads(out_path.read_text())
+        print(f"chip index up to date: {out_path}")
     return idx
 
 
@@ -102,22 +128,34 @@ def _chip_box_from_record(ch: dict) -> ChipBox:
     )
 
 
-def render_eval_chips(idx: dict, force: bool = False) -> None:
+def _overview_cycle(idx: dict) -> str:
+    """Latest cycle in the chip index (used for rendering)."""
+    return sorted(c["year"] for c in idx["cycles"])[-1]
+
+
+def render_eval_chips(
+    experiment_id: str,
+    aoi_id: str,
+    eval_set_id: str,
+    idx: dict,
+    force: bool = False,
+) -> None:
     by_year = {c["year"]: c for c in idx["cycles"]}
-    overview_cycle = by_year[OVERVIEW_CYCLE]
+    overview_year = _overview_cycle(idx)
+    overview_cycle = by_year[overview_year]
     chips_by_id = {ch["chip_id"]: ch for ch in overview_cycle["chips"]}
 
-    ev_gj = json.loads(EVAL_26916.read_text())
+    ev_gj = json.loads(eval_26916(eval_set_id).read_text())
     ev_pts_by_id = {
         f["properties"]["id"]: tuple(f["geometry"]["coordinates"]) for f in ev_gj["features"]
     }
 
-    cog = naip_cog(OVERVIEW_CYCLE)
-    CHIP_EVAL_DIR.mkdir(parents=True, exist_ok=True)
+    cog = naip_cog(aoi_id, overview_year)
+    chip_eval_dir(experiment_id).mkdir(parents=True, exist_ok=True)
     for fid, entries in idx["eval_lookup"].items():
-        chip_id_2022 = next(e["chip_id"] for e in entries if e["year"] == OVERVIEW_CYCLE)
-        ch_rec = chips_by_id[chip_id_2022]
-        out = chip_eval(fid)
+        chip_id_latest = next(e["chip_id"] for e in entries if e["year"] == overview_year)
+        ch_rec = chips_by_id[chip_id_latest]
+        out = chip_eval(experiment_id, fid)
         if not force and out.exists() and out.stat().st_mtime >= cog.stat().st_mtime:
             continue
         render_eval_chip_png(
@@ -129,19 +167,29 @@ def render_eval_chips(idx: dict, force: bool = False) -> None:
         print(f"wrote {out}")
 
 
-def render_overview(idx: dict, force: bool = False) -> None:
-    cog = naip_cog(OVERVIEW_CYCLE)
-    out = CHIP_GRID_OVERVIEW_PNG
+def render_overview(
+    experiment_id: str,
+    aoi_id: str,
+    eval_set_id: str,
+    idx: dict,
+    force: bool = False,
+) -> None:
+    overview_year = _overview_cycle(idx)
+    cog = naip_cog(aoi_id, overview_year)
+    out = chip_grid_overview_png(experiment_id)
+    out.parent.mkdir(parents=True, exist_ok=True)
     if not force and out.exists():
-        if out.stat().st_mtime >= max(cog.stat().st_mtime, CHIP_INDEX_JSON.stat().st_mtime):
+        if out.stat().st_mtime >= max(
+            cog.stat().st_mtime, chip_index_json(experiment_id).stat().st_mtime
+        ):
             print(f"grid overview up to date: {out}")
             return
 
     by_year = {c["year"]: c for c in idx["cycles"]}
-    grid = [_chip_box_from_record(ch) for ch in by_year[OVERVIEW_CYCLE]["chips"]]
-    aoi_gj = json.loads(AOI_26916.read_text())
+    grid = [_chip_box_from_record(ch) for ch in by_year[overview_year]["chips"]]
+    aoi_gj = json.loads(aoi_26916(aoi_id).read_text())
     aoi_ring = aoi_gj["features"][0]["geometry"]["coordinates"][0]
-    ev_gj = json.loads(EVAL_26916.read_text())
+    ev_gj = json.loads(eval_26916(eval_set_id).read_text())
     ev_pts = [
         (f["properties"]["id"], tuple(f["geometry"]["coordinates"]))
         for f in ev_gj["features"]
@@ -157,15 +205,30 @@ def render_overview(idx: dict, force: bool = False) -> None:
 
 
 def main() -> None:
-    import argparse
-
     parser = argparse.ArgumentParser(description="Build the chip index + verification PNGs.")
     parser.add_argument("--force", action="store_true", help="Regenerate every artifact.")
+    parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order.",
+    )
     args = parser.parse_args()
 
-    idx = build_index_if_stale(force=args.force)
-    render_eval_chips(idx, force=args.force)
-    render_overview(idx, force=args.force)
+    cfg = config.load_experiment(args.experiment)
+    experiment_id = config.experiment_id_of(cfg)
+    aoi_id = config.aoi_id_of(cfg)
+    eval_set_id = config.eval_set_id_of(cfg)
+    cp = config.chip_params_of(cfg)
+
+    idx = build_index_if_stale(
+        experiment_id=experiment_id,
+        aoi_id=aoi_id,
+        eval_set_id=eval_set_id,
+        chip_size_m=cp["chip_size_m"],
+        stride_m=cp["stride_m"],
+        force=args.force,
+    )
+    render_eval_chips(experiment_id, aoi_id, eval_set_id, idx, force=args.force)
+    render_overview(experiment_id, aoi_id, eval_set_id, idx, force=args.force)
 
 
 if __name__ == "__main__":

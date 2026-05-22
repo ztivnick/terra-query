@@ -11,20 +11,36 @@ import json
 
 import pytest
 
+from terra_query.core import config
 from terra_query.core.paths import (
-    AOI_WGS84,
-    EVAL_26916,
-    NAIP_MANIFEST,
-    S2_MANIFEST,
+    aoi_wgs84,
+    eval_26916,
     naip_cog,
+    naip_manifest,
     s2_cog,
+    s2_manifest,
 )
 from terra_query.ingest import aerial
 
 
 @pytest.fixture(scope="module")
-def aoi_geojson():
-    return json.loads(AOI_WGS84.read_text())
+def cfg() -> dict:
+    return config.load_experiment()
+
+
+@pytest.fixture(scope="module")
+def aoi_id(cfg) -> str:
+    return config.aoi_id_of(cfg)
+
+
+@pytest.fixture(scope="module")
+def eval_set_id(cfg) -> str:
+    return config.eval_set_id_of(cfg)
+
+
+@pytest.fixture(scope="module")
+def aoi_geojson(aoi_id):
+    return json.loads(aoi_wgs84(aoi_id).read_text())
 
 
 @pytest.fixture(scope="module")
@@ -39,15 +55,19 @@ def aoi_bounds_unbuffered_26916(aoi_geojson):
 
 
 @pytest.fixture(scope="module")
-def naip_manifest():
-    if not NAIP_MANIFEST.exists():
+def naip_manifest_doc(aoi_id):
+    p = naip_manifest(aoi_id)
+    if not p.exists():
         pytest.skip("naip manifest missing; run discover_aerial")
-    return json.loads(NAIP_MANIFEST.read_text())
+    return json.loads(p.read_text())
 
 
 @pytest.fixture(scope="module")
-def naip_fetched_years(naip_manifest):
-    years = [c["year"] for c in naip_manifest["cycles"] if naip_cog(c["year"]).exists()]
+def naip_fetched_years(aoi_id, naip_manifest_doc):
+    years = [
+        c["year"] for c in naip_manifest_doc["cycles"]
+        if naip_cog(aoi_id, c["year"]).exists()
+    ]
     if not years:
         pytest.skip("no NAIP COGs fetched yet")
     return years
@@ -64,12 +84,12 @@ def test_module_constants_sane():
     assert aerial.PC_STAC_URL.startswith("https://")
 
 
-def test_naip_cogs_are_valid_26916(naip_fetched_years, aoi_bounds_unbuffered_26916):
+def test_naip_cogs_are_valid_26916(aoi_id, naip_fetched_years, aoi_bounds_unbuffered_26916):
     """Each fetched NAIP COG opens, declares 26916, has 4 bands uint8, covers AOI."""
     import rasterio
 
     for year in naip_fetched_years:
-        path = naip_cog(year)
+        path = naip_cog(aoi_id, year)
         with rasterio.open(path) as ds:
             assert ds.crs.to_epsg() == 26916, f"{year}: crs {ds.crs}"
             assert ds.count == 4, f"{year}: {ds.count} bands"
@@ -80,12 +100,12 @@ def test_naip_cogs_are_valid_26916(naip_fetched_years, aoi_bounds_unbuffered_269
             assert db.bottom <= s and db.top >= n, f"{year}: y bounds {db} vs AOI"
 
 
-def test_naip_cogs_pixel_grid_anchored(naip_fetched_years):
+def test_naip_cogs_pixel_grid_anchored(aoi_id, naip_fetched_years):
     """COG upper-left pixel corner anchored to integer meters in 26916."""
     import rasterio
 
     for year in naip_fetched_years:
-        path = naip_cog(year)
+        path = naip_cog(aoi_id, year)
         with rasterio.open(path) as ds:
             t = ds.transform
             assert t.c == int(t.c), f"{year}: ul x {t.c} not integer-meter"
@@ -93,14 +113,14 @@ def test_naip_cogs_pixel_grid_anchored(naip_fetched_years):
             assert t.a > 0 and t.e < 0, f"{year}: unexpected pixel orientation"
 
 
-def test_naip_eval_points_sample_nonzero(naip_fetched_years):
+def test_naip_eval_points_sample_nonzero(aoi_id, eval_set_id, naip_fetched_years):
     """At each positive_in_scope eval point, the latest NAIP samples are non-zero."""
     import rasterio
 
-    eval_fc = json.loads(EVAL_26916.read_text())
+    eval_fc = json.loads(eval_26916(eval_set_id).read_text())
 
     latest_year = max(naip_fetched_years)
-    path = naip_cog(latest_year)
+    path = naip_cog(aoi_id, latest_year)
     with rasterio.open(path) as ds:
         for feat in eval_fc["features"]:
             if feat["properties"]["category"] != "positive_in_scope":
@@ -116,29 +136,31 @@ def test_naip_eval_points_sample_nonzero(naip_fetched_years):
 
 
 @pytest.fixture(scope="module")
-def s2_manifest():
-    if not S2_MANIFEST.exists():
+def s2_manifest_doc(aoi_id):
+    p = s2_manifest(aoi_id)
+    if not p.exists():
         pytest.skip("sentinel2 manifest missing; run discover_aerial")
-    return json.loads(S2_MANIFEST.read_text())
+    return json.loads(p.read_text())
 
 
 @pytest.fixture(scope="module")
-def s2_fetched_scenes(s2_manifest):
+def s2_fetched_scenes(aoi_id, s2_manifest_doc):
     scenes = [
-        s for s in s2_manifest["scenes"] if s2_cog(s["datetime"][:10]).exists()
+        s for s in s2_manifest_doc["scenes"]
+        if s2_cog(aoi_id, s["datetime"][:10]).exists()
     ]
     if not scenes:
         pytest.skip("no S2 COGs fetched yet")
     return scenes
 
 
-def test_s2_cogs_are_valid_26916(s2_fetched_scenes, aoi_bounds_unbuffered_26916):
+def test_s2_cogs_are_valid_26916(aoi_id, s2_fetched_scenes, aoi_bounds_unbuffered_26916):
     """Each fetched S2 COG opens, declares 26916, has 5 bands uint16, 10 m, covers AOI."""
     import rasterio
 
     for scene in s2_fetched_scenes:
         date_str = scene["datetime"][:10]
-        path = s2_cog(date_str)
+        path = s2_cog(aoi_id, date_str)
         with rasterio.open(path) as ds:
             assert ds.crs.to_epsg() == 26916, f"{date_str}: crs {ds.crs}"
             assert ds.count == len(aerial.S2_BANDS), f"{date_str}: {ds.count} bands"
@@ -168,13 +190,13 @@ def test_s2_cloud_under_cap(s2_fetched_scenes):
         assert cc < aerial.S2_CLOUD_COVER_MAX, f"cloud {cc}% >= cap"
 
 
-def test_s2_cogs_low_nodata(s2_fetched_scenes):
+def test_s2_cogs_low_nodata(aoi_id, s2_fetched_scenes):
     """S2 COG must cover the AOI - guards against partial-swath picks (T15TYM R069 etc)."""
     import rasterio
 
     for scene in s2_fetched_scenes:
         date_str = scene["datetime"][:10]
-        path = s2_cog(date_str)
+        path = s2_cog(aoi_id, date_str)
         with rasterio.open(path) as ds:
             b = ds.read(1)
         nodata_frac = float((b == 0).sum()) / b.size
@@ -184,10 +206,10 @@ def test_s2_cogs_low_nodata(s2_fetched_scenes):
         )
 
 
-def test_naip_manifest_items_have_asset_urls_after_fetch(naip_manifest, naip_fetched_years):
+def test_naip_manifest_items_have_asset_urls_after_fetch(naip_manifest_doc, naip_fetched_years):
     """Every NAIP item belonging to a fetched cycle has an asset URL + fetched_at."""
     fetched = set(naip_fetched_years)
-    for cycle in naip_manifest["cycles"]:
+    for cycle in naip_manifest_doc["cycles"]:
         if cycle["year"] not in fetched:
             continue
         for item in cycle["items"]:
@@ -198,10 +220,10 @@ def test_naip_manifest_items_have_asset_urls_after_fetch(naip_manifest, naip_fet
             assert item.get("fetched_at"), f"{item['item_id']}: fetched_at missing"
 
 
-def test_s2_manifest_scenes_have_asset_urls_after_fetch(s2_manifest, s2_fetched_scenes):
+def test_s2_manifest_scenes_have_asset_urls_after_fetch(s2_manifest_doc, s2_fetched_scenes):
     """Every fetched S2 scene has all chosen-band asset URLs and fetched_at."""
     fetched_ids = {s["item_id"] for s in s2_fetched_scenes}
-    for scene in s2_manifest["scenes"]:
+    for scene in s2_manifest_doc["scenes"]:
         if scene["item_id"] not in fetched_ids:
             continue
         assets = scene.get("assets", {})

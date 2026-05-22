@@ -11,6 +11,10 @@ Vocabulary:
 - "GT chip-location for concept C": any chip-location whose bbox in
   26916 contains the 26916 point coord of some eval feature whose
   `type` maps to concept C.
+
+From S6 onward, the production search path goes through the pgvector
+store (`evaluate_concept_via_db`). The in-memory `evaluate_concept`
+stays as a pure-math unit-test fixture.
 """
 
 from __future__ import annotations
@@ -20,26 +24,29 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
+import psycopg
 
 from terra_query.core.paths import (
-    CHIP_INDEX_JSON,
-    EVAL_26916,
+    chip_index_json,
     embeddings_json,
     embeddings_npy,
+    eval_26916,
 )
+from terra_query.embed.models import PRODUCTION_MODEL_ID
 from terra_query.embed.query import SearchResult, search
 from terra_query.eval.queries import CONCEPT_TO_N0_TYPE
+from terra_query.vector_store.search import search as vs_search
 
 # K values we report for hit@K / recall@K. Capped at 20.
 K_VALUES = (1, 5, 10, 20)
 
 
-def load_chip_index() -> dict:
-    return json.loads(CHIP_INDEX_JSON.read_text())
+def load_chip_index(experiment_id: str) -> dict:
+    return json.loads(chip_index_json(experiment_id).read_text())
 
 
-def load_eval_features() -> list[dict]:
-    return json.loads(EVAL_26916.read_text())["features"]
+def load_eval_features(eval_set_id: str) -> list[dict]:
+    return json.loads(eval_26916(eval_set_id).read_text())["features"]
 
 
 def _cycle_block(chip_index: dict, year: str) -> dict:
@@ -58,6 +65,17 @@ def chip_location_index(chip_index: dict) -> list[dict]:
     `inside_aoi`.
     """
     return _cycle_block(chip_index, chip_index["cycles"][0]["year"])["chips"]
+
+
+def chip_location_to_index_map(chip_index: dict) -> dict[str, int]:
+    """Map chip_location_id ("r034_c028") -> 0-based row index in chip_location_index.
+
+    Cycle-agnostic (uses row/col directly). The vector store returns
+    chip_location_id strings; this is how we map them back to the integer
+    indices used by GT sets.
+    """
+    locations = chip_location_index(chip_index)
+    return {f"r{loc['row']:03d}_c{loc['col']:03d}": i for i, loc in enumerate(locations)}
 
 
 def build_ground_truth(
@@ -113,24 +131,14 @@ class ConceptResult:
     top_k_cycles: list[str]
 
 
-def evaluate_concept(
+def _compute_concept_metrics(
     concept: str,
-    ensemble_emb: np.ndarray,
-    embeddings_by_cycle: dict[str, np.ndarray],
+    top_indices: list[int],
+    top_scores: list[float],
+    top_cycles: list[str],
     gt_locations: set[int],
-    top_k_max: int = max(K_VALUES),
 ) -> ConceptResult:
-    """Compute hit@K, recall@K, MRR for one concept's prompt-ensembled query.
-
-    For no-GT concepts, pass `gt_locations = set()`: metrics will be
-    0/0 but `top_k_indices` will still rank the chips so thumbnails
-    can be rendered for qualitative inspection.
-    """
-    res: SearchResult = search(ensemble_emb, embeddings_by_cycle, top_k=top_k_max)
-    top_indices = res.chip_indices.tolist()
-    top_scores = res.scores.tolist()
-    top_cycles = list(res.cycle_keys)
-
+    """Pure metric computation: hit@K, recall@K, MRR over a pre-ranked list."""
     hit_at_k: dict[int, float] = {}
     recall_at_k: dict[int, float] = {}
     for k in K_VALUES:
@@ -156,6 +164,62 @@ def evaluate_concept(
         top_k_indices=top_indices,
         top_k_scores=top_scores,
         top_k_cycles=top_cycles,
+    )
+
+
+def evaluate_concept(
+    concept: str,
+    ensemble_emb: np.ndarray,
+    embeddings_by_cycle: dict[str, np.ndarray],
+    gt_locations: set[int],
+    top_k_max: int = max(K_VALUES),
+) -> ConceptResult:
+    """In-memory path: numpy search + metrics. Used by tests + ensemble CLI.
+
+    The production gate path is `evaluate_concept_via_db`. This function
+    is kept as the pure-math fixture so the metric logic is testable
+    without a database.
+    """
+    res: SearchResult = search(ensemble_emb, embeddings_by_cycle, top_k=top_k_max)
+    return _compute_concept_metrics(
+        concept,
+        top_indices=res.chip_indices.tolist(),
+        top_scores=res.scores.tolist(),
+        top_cycles=list(res.cycle_keys),
+        gt_locations=gt_locations,
+    )
+
+
+def evaluate_concept_via_db(
+    concept: str,
+    ensemble_emb: np.ndarray,
+    chip_location_to_index: dict[str, int],
+    gt_locations: set[int],
+    top_k_max: int = max(K_VALUES),
+    model_id: str = PRODUCTION_MODEL_ID,
+    bands: str = "rgb",
+    conn: psycopg.Connection | None = None,
+    overfetch: int | None = None,
+) -> ConceptResult:
+    """DB-backed path: pgvector HNSW + max-pool in SQL + metrics.
+
+    `chip_location_to_index` maps the DB's chip_location_id strings back
+    to the 0-based row index used by GT sets. Build it once per run via
+    `chip_location_to_index_map(chip_index)`.
+    """
+    hits = vs_search(
+        ensemble_emb,
+        top_k=top_k_max,
+        model_id=model_id,
+        bands=bands,
+        conn=conn,
+        overfetch=overfetch,
+    )
+    top_indices = [chip_location_to_index[h.chip_location_id] for h in hits]
+    top_scores = [h.score for h in hits]
+    top_cycles = [h.winning_cycle for h in hits]
+    return _compute_concept_metrics(
+        concept, top_indices, top_scores, top_cycles, gt_locations,
     )
 
 
@@ -236,6 +300,7 @@ def random_metrics_empirical(
 # ---- loading the per-cycle embedding artifacts ----
 
 def load_embeddings_for_combo(
+    experiment_id: str,
     model_id: str,
     bands: str,
     cycles: list[str],
@@ -248,8 +313,8 @@ def load_embeddings_for_combo(
     embeddings: dict[str, np.ndarray] = {}
     chip_id_order: list[str] | None = None
     for cycle in cycles:
-        npy = embeddings_npy(model_id, bands, cycle)
-        js = embeddings_json(model_id, bands, cycle)
+        npy = embeddings_npy(experiment_id, model_id, bands, cycle)
+        js = embeddings_json(experiment_id, model_id, bands, cycle)
         if not (npy.exists() and js.exists()):
             raise FileNotFoundError(f"missing embedding for ({model_id}, {bands}, {cycle})")
         arr = np.load(npy)

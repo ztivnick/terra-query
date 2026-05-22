@@ -3,7 +3,8 @@ import json
 import pytest
 from shapely.geometry import Point, Polygon
 
-from terra_query.core.paths import AOI_26916, CRS_VERIFICATION, EVAL_26916
+from terra_query.core import config
+from terra_query.core.paths import CRS_VERIFICATION, aoi_26916, eval_26916
 
 
 def _declared_epsg(fc: dict) -> int:
@@ -12,12 +13,14 @@ def _declared_epsg(fc: dict) -> int:
 
 @pytest.fixture(scope="module")
 def aoi_proj() -> dict:
-    return json.loads(AOI_26916.read_text())
+    cfg = config.load_experiment()
+    return json.loads(aoi_26916(config.aoi_id_of(cfg)).read_text())
 
 
 @pytest.fixture(scope="module")
 def eval_proj() -> dict:
-    return json.loads(EVAL_26916.read_text())
+    cfg = config.load_experiment()
+    return json.loads(eval_26916(config.eval_set_id_of(cfg)).read_text())
 
 
 def test_aoi_projected_artifact_shape(aoi_proj):

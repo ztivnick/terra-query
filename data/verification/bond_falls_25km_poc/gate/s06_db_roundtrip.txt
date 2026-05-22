@@ -1,0 +1,52 @@
+warning: `VIRTUAL_ENV=/opt/homebrew` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+======================================================================
+S06 DB roundtrip sanity log
+generated: 2026-05-22T01:38:26.790473+00:00
+======================================================================
+
+-- resolved DSN --
+  TERRA_QUERY_DATABASE_URL env: unset
+  effective DSN: postgresql://terra:terra@localhost:5433/terra_query
+  default DSN:   postgresql://terra:terra@localhost:5433/terra_query
+  match default: True
+
+-- extensions --
+     plpgsql: 1.0
+     postgis: 3.6.3
+      vector: 0.8.2
+  postgres:   PostgreSQL 16.14 (Debian 16.14-1.pgdg12+1) on aarch64-unknown-linux-gnu
+
+-- row counts --
+  total rows:                   13254
+  distinct chip_location_ids:    2209
+  distinct (model_id, bands):       1
+  cycle 2012:    2209 rows  (1822 inside_aoi)
+  cycle 2014:    2209 rows  (1822 inside_aoi)
+  cycle 2016:    2209 rows  (1822 inside_aoi)
+  cycle 2018:    2209 rows  (1822 inside_aoi)
+  cycle 2020:    2209 rows  (1822 inside_aoi)
+  cycle 2022:    2209 rows  (1822 inside_aoi)
+
+-- geometry SRIDs --
+  footprint SRID = 26916, center SRID = 26916
+
+-- query latency (top-20, 50 trials each) --
+  plain:           median   26.5 ms  p95   31.1 ms  max   40.8 ms
+  bbox-filtered:   median    0.9 ms  p95    1.1 ms  max    1.7 ms
+  near-filtered:   median    0.5 ms  p95    0.6 ms  max    0.7 ms
+
+-- spatial filter correctness --
+  bbox around bond-falls covers 252 rows (~42 unique locations x 6 cycles)
+  chip-locations containing bond-falls 26916 point: ['r022_c022', 'r022_c023', 'r023_c022', 'r023_c023']
+  filtered query returned 20 locations; 0 leaked through filter (must be 0): []
+
+-- summary --
+  row count:                13254 (expected 13254)  PASS
+  distinct locations:       2209 (expected 2209)  PASS
+  geometries in EPSG:26916: PASS
+  median plain latency:     26.5 ms  PASS (<100)
+  bbox filter integrity:    PASS (0 leaked)
+  bond-falls containment:   PASS (footprint covers point)
+
+======================================================================
+done.

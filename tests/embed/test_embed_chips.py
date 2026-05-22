@@ -8,9 +8,10 @@ import json
 import numpy as np
 import pytest
 
+from terra_query.core import config
 from terra_query.core.paths import (
-    CHIP_INDEX_JSON,
     MODEL_WEIGHTS_MANIFEST,
+    chip_index_json,
     naip_cog,
 )
 from terra_query.embed import models
@@ -23,10 +24,16 @@ from terra_query.embed.embed_chips import (
 
 
 @pytest.fixture(scope="module")
-def chip_index() -> dict:
-    if not CHIP_INDEX_JSON.exists():
+def cfg() -> dict:
+    return config.load_experiment()
+
+
+@pytest.fixture(scope="module")
+def chip_index(cfg) -> dict:
+    p = chip_index_json(config.experiment_id_of(cfg))
+    if not p.exists():
         pytest.skip("chip index missing; run `build_chip_index` first")
-    return json.loads(CHIP_INDEX_JSON.read_text())
+    return json.loads(p.read_text())
 
 
 @pytest.fixture(scope="module")
@@ -67,29 +74,31 @@ def test_get_cycle_block_missing_year_raises(chip_index):
         _get_cycle_block(chip_index, "1999")
 
 
-def test_embed_one_chip_bond_falls_rgb(chip_index, production_model_loaded):
+def test_embed_one_chip_bond_falls_rgb(chip_index, cfg, production_model_loaded):
     """Embed Bond Falls' 2022 RGB chip with the production model -> unit vector
     of the expected dimensionality."""
+    aoi_id = config.aoi_id_of(cfg)
     model, preprocess, _tokenizer, device, embed_dim = production_model_loaded
     bf_entry = next(e for e in chip_index["eval_lookup"]["bond-falls"] if e["year"] == "2022")
     chips_by_id = {c["chip_id"]: c for c in _get_cycle_block(chip_index, "2022")["chips"]}
     bf_chip = chips_by_id[bf_entry["chip_id"]]
-    emb = embed_one_chip(bf_chip, naip_cog("2022"), "rgb", model, preprocess, device)
+    emb = embed_one_chip(bf_chip, naip_cog(aoi_id, "2022"), "rgb", model, preprocess, device)
     assert emb.shape == (embed_dim,)
     assert emb.dtype == np.float32
     assert abs(float(np.linalg.norm(emb)) - 1.0) < 1e-4
 
 
-def test_embed_one_chip_bond_falls_cir(chip_index, production_model_loaded):
+def test_embed_one_chip_bond_falls_cir(chip_index, cfg, production_model_loaded):
     """Same chip, CIR bands. PIL packs (NIR, R, G) as a 3-channel image and
     the preprocessor does its standard normalization. We don't expect CIR
     semantics to match the CLIP training distribution, but the output must
     still be a unit-normalized vector of the right shape."""
+    aoi_id = config.aoi_id_of(cfg)
     model, preprocess, _tokenizer, device, embed_dim = production_model_loaded
     bf_entry = next(e for e in chip_index["eval_lookup"]["bond-falls"] if e["year"] == "2022")
     chips_by_id = {c["chip_id"]: c for c in _get_cycle_block(chip_index, "2022")["chips"]}
     bf_chip = chips_by_id[bf_entry["chip_id"]]
-    emb = embed_one_chip(bf_chip, naip_cog("2022"), "cir", model, preprocess, device)
+    emb = embed_one_chip(bf_chip, naip_cog(aoi_id, "2022"), "cir", model, preprocess, device)
     assert emb.shape == (embed_dim,)
     assert emb.dtype == np.float32
     assert abs(float(np.linalg.norm(emb)) - 1.0) < 1e-4
@@ -98,23 +107,24 @@ def test_embed_one_chip_bond_falls_cir(chip_index, production_model_loaded):
 # === full-cycle embed artifact (production model only) ===
 
 
-def _load_npy_and_sidecar(model_id: str, bands: str, cycle: str):
+def _load_npy_and_sidecar(experiment_id: str, model_id: str, bands: str, cycle: str):
     from terra_query.core.paths import embeddings_json, embeddings_npy
 
-    npy = embeddings_npy(model_id, bands, cycle)
-    js = embeddings_json(model_id, bands, cycle)
+    npy = embeddings_npy(experiment_id, model_id, bands, cycle)
+    js = embeddings_json(experiment_id, model_id, bands, cycle)
     if not (npy.exists() and js.exists()):
         pytest.skip(
-            f"embedding artifact missing for ({model_id}, {bands}, {cycle}); "
+            f"embedding artifact missing for ({experiment_id}, {model_id}, {bands}, {cycle}); "
             f"run embed_chips first"
         )
     return np.load(npy), json.loads(js.read_text())
 
 
-def test_production_rgb_2022_artifact_shape_and_norms(chip_index):
+def test_production_rgb_2022_artifact_shape_and_norms(chip_index, cfg):
     """Production embed cell shape + L2-unit-norm contract."""
+    experiment_id = config.experiment_id_of(cfg)
     embed_dim = models.spec(models.PRODUCTION_MODEL_ID).embed_dim
-    arr, sc = _load_npy_and_sidecar(models.PRODUCTION_MODEL_ID, "rgb", "2022")
+    arr, sc = _load_npy_and_sidecar(experiment_id, models.PRODUCTION_MODEL_ID, "rgb", "2022")
     cycle_2022 = _get_cycle_block(chip_index, "2022")
     assert arr.shape == (len(cycle_2022["chips"]), embed_dim)
     assert arr.dtype == np.float32
@@ -128,16 +138,17 @@ def test_production_rgb_2022_artifact_shape_and_norms(chip_index):
     assert sc["cycle"] == "2022"
 
 
-def test_production_rgb_2022_sidecar_chip_ids_match_index_order(chip_index):
+def test_production_rgb_2022_sidecar_chip_ids_match_index_order(chip_index, cfg):
     """Sidecar chip_ids must match cycles[year=2022].chips order exactly so
     row i of the .npy maps to chip_ids[i] in the chip index."""
-    _arr, sc = _load_npy_and_sidecar(models.PRODUCTION_MODEL_ID, "rgb", "2022")
+    experiment_id = config.experiment_id_of(cfg)
+    _arr, sc = _load_npy_and_sidecar(experiment_id, models.PRODUCTION_MODEL_ID, "rgb", "2022")
     cycle_2022 = _get_cycle_block(chip_index, "2022")
     expected_ids = [c["chip_id"] for c in cycle_2022["chips"]]
     assert sc["chip_ids"] == expected_ids
 
 
-def test_production_rgb_2022_pins_chip_index_and_weights_provenance(chip_index):
+def test_production_rgb_2022_pins_chip_index_and_weights_provenance(chip_index, cfg):
     """Sidecar pins which chip_index and which weights produced this embedding.
     Idempotency uses the EMBEDDING-RELEVANT subset (excludes generated_at +
     eval_lookup) so adding new eval features doesn't false-flag existing
@@ -145,8 +156,9 @@ def test_production_rgb_2022_pins_chip_index_and_weights_provenance(chip_index):
     from terra_query.core.paths import MODEL_WEIGHTS_MANIFEST
     from terra_query.embed.embed_chips import _chip_index_checksum
 
-    _arr, sc = _load_npy_and_sidecar(models.PRODUCTION_MODEL_ID, "rgb", "2022")
-    assert sc["chip_index_sha256"] == _chip_index_checksum()
+    experiment_id = config.experiment_id_of(cfg)
+    _arr, sc = _load_npy_and_sidecar(experiment_id, models.PRODUCTION_MODEL_ID, "rgb", "2022")
+    assert sc["chip_index_sha256"] == _chip_index_checksum(experiment_id)
     wmf = json.loads(MODEL_WEIGHTS_MANIFEST.read_text())
     assert sc["weights_sha256"] == wmf["models"][models.PRODUCTION_MODEL_ID]["sha256"]
 
@@ -154,7 +166,7 @@ def test_production_rgb_2022_pins_chip_index_and_weights_provenance(chip_index):
 # === parallelization equivalence ===
 
 
-def test_dataloader_path_matches_serial_for_subset(chip_index, production_model_loaded):
+def test_dataloader_path_matches_serial_for_subset(chip_index, cfg, production_model_loaded):
     """DataLoader-backed embedding must match the serial path within fp32
     tolerance for a small subset of chips. Tests both num_workers=0
     (in-process) and num_workers>0 (multi-process)."""
@@ -168,9 +180,10 @@ def test_dataloader_path_matches_serial_for_subset(chip_index, production_model_
         embed_one_chip,
     )
 
+    aoi_id = config.aoi_id_of(cfg)
     model, preprocess, _tokenizer, device, _embed_dim = production_model_loaded
     chips = _get_cycle_block(chip_index, "2022")["chips"][:8]
-    cog = naip_cog("2022")
+    cog = naip_cog(aoi_id, "2022")
 
     serial = np.stack(
         [embed_one_chip(ch, cog, "rgb", model, preprocess, device) for ch in chips],

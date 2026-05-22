@@ -7,20 +7,27 @@ import json
 import numpy as np
 import pytest
 
-from terra_query.core.paths import CHIP_INDEX_JSON, EVAL_26916
+from terra_query.core import config
+from terra_query.core.paths import chip_index_json
 from terra_query.eval import n0_retrieval, queries
 
 
 @pytest.fixture(scope="module")
-def chip_index():
-    if not CHIP_INDEX_JSON.exists():
-        pytest.skip("chip index missing; run `build_chip_index` first")
-    return json.loads(CHIP_INDEX_JSON.read_text())
+def cfg() -> dict:
+    return config.load_experiment()
 
 
 @pytest.fixture(scope="module")
-def eval_features():
-    return n0_retrieval.load_eval_features()
+def chip_index(cfg):
+    p = chip_index_json(config.experiment_id_of(cfg))
+    if not p.exists():
+        pytest.skip("chip index missing; run `build_chip_index` first")
+    return json.loads(p.read_text())
+
+
+@pytest.fixture(scope="module")
+def eval_features(cfg):
+    return n0_retrieval.load_eval_features(config.eval_set_id_of(cfg))
 
 
 # ---- ground-truth construction ----
@@ -169,14 +176,14 @@ def test_random_mrr_closed_form_matches_empirical():
 # ---- loading combos ----
 
 
-def test_load_embeddings_for_combo_production_rgb_2022():
+def test_load_embeddings_for_combo_production_rgb_2022(cfg):
     """Load the production cell as a 1-cycle combo and verify shape +
     chip_id_order is the location-only key (year prefix stripped)."""
     from terra_query.embed import models
 
     embed_dim = models.spec(models.PRODUCTION_MODEL_ID).embed_dim
     embs, chip_id_order = n0_retrieval.load_embeddings_for_combo(
-        models.PRODUCTION_MODEL_ID, "rgb", ["2022"]
+        config.experiment_id_of(cfg), models.PRODUCTION_MODEL_ID, "rgb", ["2022"]
     )
     assert set(embs) == {"2022"}
     assert embs["2022"].shape[1] == embed_dim

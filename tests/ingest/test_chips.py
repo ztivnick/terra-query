@@ -6,14 +6,31 @@ import json
 
 import pytest
 
+from terra_query.core import config
 from terra_query.core.paths import (
-    AOI_26916,
-    CHIP_EVAL_DIR,
-    EVAL_26916,
-    NAIP_MANIFEST,
+    aoi_26916,
     chip_eval,
+    chip_eval_dir,
+    eval_26916,
     naip_cog,
+    naip_manifest,
 )
+
+
+def _cfg() -> dict:
+    return config.load_experiment()
+
+
+def _aoi_id() -> str:
+    return config.aoi_id_of(_cfg())
+
+
+def _experiment_id() -> str:
+    return config.experiment_id_of(_cfg())
+
+
+def _eval_set_id() -> str:
+    return config.eval_set_id_of(_cfg())
 from terra_query.ingest.chips import (
     CHIP_SIZE_M,
     CIR_BANDS,
@@ -150,17 +167,20 @@ def real_chip_index() -> dict:
     """Assemble the chip index from the real reprojected AOI / NAIP COGs on disk."""
     from shapely.geometry import shape
 
-    aoi_gj = json.loads(AOI_26916.read_text())
+    aoi_id = _aoi_id()
+    eval_set_id = _eval_set_id()
+
+    aoi_gj = json.loads(aoi_26916(aoi_id).read_text())
     aoi_poly = shape(aoi_gj["features"][0]["geometry"])
 
-    ev_gj = json.loads(EVAL_26916.read_text())
+    ev_gj = json.loads(eval_26916(eval_set_id).read_text())
     ev_pts: list[tuple[str, tuple[float, float]]] = []
     for f in ev_gj["features"]:
         x, y = f["geometry"]["coordinates"]
         ev_pts.append((f["properties"]["id"], (float(x), float(y))))
 
-    manifest = json.loads(NAIP_MANIFEST.read_text())
-    cycle_cogs = [(c["year"], naip_cog(c["year"])) for c in manifest["cycles"]]
+    manifest = json.loads(naip_manifest(aoi_id).read_text())
+    cycle_cogs = [(c["year"], naip_cog(aoi_id, c["year"])) for c in manifest["cycles"]]
 
     return assemble_chip_index(
         aoi_polygon_26916=aoi_poly,
@@ -273,7 +293,7 @@ def test_index_eval_chip_bbox_contains_feature_point(real_chip_index):
         for ch in cycle["chips"]:
             bbox_by_id[ch["chip_id"]] = tuple(ch["bbox_26916"])
     # eval points in 26916
-    ev_gj = json.loads(EVAL_26916.read_text())
+    ev_gj = json.loads(eval_26916(_eval_set_id()).read_text())
     pts = {f["properties"]["id"]: tuple(f["geometry"]["coordinates"]) for f in ev_gj["features"]}
     for fid, entries in eval_lookup.items():
         x, y = pts[fid]
@@ -302,7 +322,7 @@ def test_read_chip_rgb_shape_matches_native(real_chip_index):
     """RGB read returns (3, native_h, native_w) for the cycle."""
     ch_2022 = _primary_chip_for(real_chip_index, "bond-falls", "2022")
     cb = ChipBox(row=ch_2022["row"], col=ch_2022["col"], west=ch_2022["bbox_26916"][0], south=ch_2022["bbox_26916"][1])
-    arr = read_chip(cb, naip_cog("2022"), bands=RGB_BANDS)
+    arr = read_chip(cb, naip_cog(_aoi_id(), "2022"), bands=RGB_BANDS)
     assert arr.shape == (3, 373, 373)
     assert arr.dtype.name == "uint8"
     # NAIP has no in-AOI nodata - sanity that the read isn't all zero
@@ -313,7 +333,7 @@ def test_read_chip_cir_shape(real_chip_index):
     """CIR (NIR-R-G) returns 3 bands."""
     ch = _primary_chip_for(real_chip_index, "bond-falls", "2022")
     cb = ChipBox(row=ch["row"], col=ch["col"], west=ch["bbox_26916"][0], south=ch["bbox_26916"][1])
-    arr = read_chip(cb, naip_cog("2022"), bands=CIR_BANDS)
+    arr = read_chip(cb, naip_cog(_aoi_id(), "2022"), bands=CIR_BANDS)
     assert arr.shape == (3, 373, 373)
 
 
@@ -321,7 +341,7 @@ def test_read_chip_four_band_shape(real_chip_index):
     """All 4 bands return (4, h, w)."""
     ch = _primary_chip_for(real_chip_index, "bond-falls", "2022")
     cb = ChipBox(row=ch["row"], col=ch["col"], west=ch["bbox_26916"][0], south=ch["bbox_26916"][1])
-    arr = read_chip(cb, naip_cog("2022"), bands=(1, 2, 3, 4))
+    arr = read_chip(cb, naip_cog(_aoi_id(), "2022"), bands=(1, 2, 3, 4))
     assert arr.shape == (4, 373, 373)
 
 
@@ -329,18 +349,18 @@ def test_read_chip_1m_cycle_shape(real_chip_index):
     """1.0 m cycle (2012) returns (3, 224, 224)."""
     ch = _primary_chip_for(real_chip_index, "bond-falls", "2012")
     cb = ChipBox(row=ch["row"], col=ch["col"], west=ch["bbox_26916"][0], south=ch["bbox_26916"][1])
-    arr = read_chip(cb, naip_cog("2012"), bands=RGB_BANDS)
+    arr = read_chip(cb, naip_cog(_aoi_id(), "2012"), bands=RGB_BANDS)
     assert arr.shape == (3, 224, 224)
 
 
 def test_read_chip_rejects_invalid_bands():
     cb = ChipBox(row=0, col=0, west=333424.0, south=5139120.0)
     with pytest.raises(ValueError):
-        read_chip(cb, naip_cog("2022"), bands=(0,))
+        read_chip(cb, naip_cog(_aoi_id(), "2022"), bands=(0,))
     with pytest.raises(ValueError):
-        read_chip(cb, naip_cog("2022"), bands=(5,))
+        read_chip(cb, naip_cog(_aoi_id(), "2022"), bands=(5,))
     with pytest.raises(ValueError):
-        read_chip(cb, naip_cog("2022"), bands=())
+        read_chip(cb, naip_cog(_aoi_id(), "2022"), bands=())
 
 
 def test_grid_has_no_holes_inside_aoi(real_chip_index):
@@ -364,30 +384,33 @@ def test_grid_has_no_holes_inside_aoi(real_chip_index):
 
 def test_cli_chip_index_json_on_disk():
     """The CLI writes the chip index JSON to disk and it round-trips."""
-    from terra_query.core.paths import CHIP_INDEX_JSON
+    from terra_query.core.paths import chip_index_json
 
-    assert CHIP_INDEX_JSON.exists()
-    idx = json.loads(CHIP_INDEX_JSON.read_text())
+    p = chip_index_json(_experiment_id())
+    assert p.exists()
+    idx = json.loads(p.read_text())
     assert idx["working_crs"] == "EPSG:26916"
     assert sum(len(c["chips"]) for c in idx["cycles"]) == 13254
 
 
 def test_cli_eval_chip_pngs_on_disk():
     """One PNG per eval feature, written by the CLI."""
-    ev_gj = json.loads(EVAL_26916.read_text())
+    experiment_id = _experiment_id()
+    ev_gj = json.loads(eval_26916(_eval_set_id()).read_text())
     fids = [f["properties"]["id"] for f in ev_gj["features"]]
     for fid in fids:
-        p = chip_eval(fid)
+        p = chip_eval(experiment_id, fid)
         assert p.exists(), f"missing eval chip png: {p}"
         # PNG file sanity (header bytes)
         assert p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_cli_grid_overview_png_on_disk():
-    from terra_query.core.paths import CHIP_GRID_OVERVIEW_PNG
+    from terra_query.core.paths import chip_grid_overview_png
 
-    assert CHIP_GRID_OVERVIEW_PNG.exists()
-    assert CHIP_GRID_OVERVIEW_PNG.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    p = chip_grid_overview_png(_experiment_id())
+    assert p.exists()
+    assert p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_render_eval_chip_png_writes_png_with_crosshair(real_chip_index, tmp_path):
@@ -399,7 +422,7 @@ def test_render_eval_chip_png_writes_png_with_crosshair(real_chip_index, tmp_pat
     ch = _primary_chip_for(real_chip_index, fid, "2022")
     cb = ChipBox(row=ch["row"], col=ch["col"], west=ch["bbox_26916"][0], south=ch["bbox_26916"][1])
 
-    ev_gj = json.loads(EVAL_26916.read_text())
+    ev_gj = json.loads(eval_26916(_eval_set_id()).read_text())
     pt = next(
         tuple(f["geometry"]["coordinates"])
         for f in ev_gj["features"]
@@ -407,7 +430,7 @@ def test_render_eval_chip_png_writes_png_with_crosshair(real_chip_index, tmp_pat
     )
 
     out = tmp_path / f"{fid}.png"
-    render_eval_chip_png(cb, naip_cog("2022"), pt, out)
+    render_eval_chip_png(cb, naip_cog(_aoi_id(), "2022"), pt, out)
 
     assert out.exists()
     img = np.array(Image.open(out))

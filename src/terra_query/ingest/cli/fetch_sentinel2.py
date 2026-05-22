@@ -1,23 +1,27 @@
 """CLI: fetch the per-scene Sentinel-2 COGs picked by `discover_aerial`.
 
-Reads scene picks from the S2 manifest, fetches each (idempotent), and
-updates the manifest. Run as:
+Reads scene picks from the per-AOI S2 manifest, fetches each (idempotent),
+and updates the manifest.
 
     uv run python -m terra_query.ingest.cli.fetch_sentinel2
+    uv run python -m terra_query.ingest.cli.fetch_sentinel2 --experiment /path/to/cfg.yaml
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
+from terra_query.core import config
 from terra_query.core.paths import (
-    AOI_WGS84,
     REPO_ROOT,
-    S2_MANIFEST,
+    aoi_wgs84,
     s2_cog,
+    s2_manifest,
 )
 from terra_query.ingest.aerial import (
     S2_COLLECTION,
@@ -46,14 +50,25 @@ def _pick_from_scene(scene: dict) -> StacPick:
 
 
 def main() -> int:
-    aoi = json.loads(AOI_WGS84.read_text())
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order.",
+    )
+    args = parser.parse_args()
+    cfg = config.load_experiment(args.experiment)
+    aoi_id = config.aoi_id_of(cfg)
+
+    aoi = json.loads(aoi_wgs84(aoi_id).read_text())
     bounds = aoi_bounds_buffered_26916(aoi)
+    print(f"AOI id: {aoi_id}")
     print(f"AOI 26916 buffered bounds: {bounds}")
 
-    manifest = json.loads(S2_MANIFEST.read_text())
+    manifest_path = s2_manifest(aoi_id)
+    manifest = json.loads(manifest_path.read_text())
     for scene in manifest["scenes"]:
         date_str = _date_only(scene["datetime"])
-        out = s2_cog(date_str)
+        out = s2_cog(aoi_id, date_str)
         pick = _pick_from_scene(scene)
         print(f"[S2 {date_str}] {pick.item_id} -> {out.relative_to(REPO_ROOT)}")
         t0 = time.monotonic()
@@ -71,7 +86,7 @@ def main() -> int:
         print(f"  {'skipped (valid COG)' if skipped else 'wrote COG'}; {elapsed:.2f}s")
 
     manifest["last_fetch_at"] = _now_utc()
-    S2_MANIFEST.write_text(json.dumps(manifest, indent=2))
+    manifest_path.write_text(json.dumps(manifest, indent=2))
     return 0
 
 

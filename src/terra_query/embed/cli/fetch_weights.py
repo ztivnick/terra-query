@@ -1,7 +1,9 @@
-"""CLI: download all 4 model weights, verify they load on MPS, write a manifest.
+"""CLI: download model weights, verify they load on MPS, write a manifest.
 
 Idempotent: skips re-download if the destination file's SHA256 matches the
 manifest entry. Always re-verifies the manifest entries against on-disk files.
+
+Defaults to the experiment YAML's `model_id` if no `--models` is given.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from pathlib import Path
 
 from huggingface_hub import hf_hub_download
 
+from terra_query.core import config
 from terra_query.core.paths import (
     MODEL_WEIGHTS_DIR,
     MODEL_WEIGHTS_MANIFEST,
@@ -149,10 +152,15 @@ def _fetch_one(model_id: str, force: bool, manifest: dict, verify_load: bool) ->
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fetch model weights + write manifest.")
     parser.add_argument(
+        "--experiment", type=Path, default=None,
+        help="Path to experiment YAML; defaults to config resolution order. "
+             "Used to pick the default model_id when --models is omitted.",
+    )
+    parser.add_argument(
         "--models",
         nargs="*",
         default=None,
-        help="Subset of model_ids to fetch; default = all 4.",
+        help="Subset of model_ids to fetch; default = YAML model_id.",
     )
     parser.add_argument(
         "--force",
@@ -166,7 +174,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    targets = args.models if args.models else models.model_ids()
+    if args.models:
+        targets = args.models
+    else:
+        cfg = config.load_experiment(args.experiment)
+        targets = [config.model_id_of(cfg)]
     manifest = _load_manifest()
 
     MODEL_WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)

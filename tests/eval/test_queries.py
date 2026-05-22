@@ -28,10 +28,13 @@ def test_gt_concept_n0_types_match_known_eval_set():
     """Every GT concept's eval-type must appear in the eval set, and vice versa."""
     import json
 
-    from terra_query.core.paths import EVAL_26916
+    from terra_query.core import config
+    from terra_query.core.paths import eval_26916
 
+    cfg = config.load_experiment()
     eval_types = {
-        f["properties"]["type"] for f in json.loads(EVAL_26916.read_text())["features"]
+        f["properties"]["type"]
+        for f in json.loads(eval_26916(config.eval_set_id_of(cfg)).read_text())["features"]
     }
     gt_types = {queries.CONCEPT_TO_N0_TYPE[c] for c in queries.GT_CONCEPTS}
     assert gt_types == eval_types, f"GT concept types {gt_types} != eval set types {eval_types}"

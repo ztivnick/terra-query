@@ -19,6 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+DEFAULT_MPS_BATCH_SIZE = 16  # safe baseline on a 32 GB M-series unified memory
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     """Everything we need to fetch + load one CLIP-family model."""
@@ -31,6 +34,7 @@ class ModelSpec:
     pretrained: str | None  # e.g. "openai" (open_clip cache key), or None
     image_size: int  # input resolution per model release
     embed_dim: int  # joint text/image embedding dim
+    mps_batch_size: int = DEFAULT_MPS_BATCH_SIZE  # per-model batch ceiling on MPS
 
 
 # the production model (and any candidates an experimenter registers later)
@@ -48,16 +52,18 @@ MODELS: dict[str, ModelSpec] = {
         pretrained=None,
         image_size=336,
         embed_dim=768,
+        # 16 keeps headroom on 32 GB unified memory while staying GPU-saturated;
+        # the 336 variant has ~2.25x more transformer tokens than ViT-L/14 (224).
+        mps_batch_size=16,
     ),
 }
 
-# bump this constant to point the whole pipeline at a different registered
-# candidate. The CLI defaults, the production loader, and the gate harness
-# all read from here, so a one-line change is enough to swap models. The
-# full swap (fetch new weights, embed chips, regenerate the gate, purge
-# old artifacts) is a manual procedure today; see README.md, "Swapping the
-# production model". R1 (between S06 and S07) replaces the manual flow
-# with a single `swap_model` CLI.
+# PRODUCTION_MODEL_ID is the registered default for callers that DON'T
+# load an experiment YAML (e.g. the in-memory `evaluate_concept` test
+# fixture). Every R1+ CLI reads `model_id` from the experiment YAML;
+# the YAML supersedes this constant for everything else. To swap the
+# production model end-to-end (fetch + embed + load + regenerate + purge
+# old) use `python -m terra_query.embed.cli.swap_model`.
 PRODUCTION_MODEL_ID = "georsclip-vit-l-14-336"
 
 

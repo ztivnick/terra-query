@@ -13,17 +13,20 @@ from terra_query.core.crs import (
     to_working,
     working_crs,
 )
-from terra_query.core.paths import AOI_WGS84, EVAL_WGS84
+from terra_query.core import config
+from terra_query.core.paths import aoi_wgs84, eval_wgs84
 
 
 @pytest.fixture(scope="module")
 def aoi():
-    return json.loads(AOI_WGS84.read_text())
+    cfg = config.load_experiment()
+    return json.loads(aoi_wgs84(config.aoi_id_of(cfg)).read_text())
 
 
 @pytest.fixture(scope="module")
 def eval_fc():
-    return json.loads(EVAL_WGS84.read_text())
+    cfg = config.load_experiment()
+    return json.loads(eval_wgs84(config.eval_set_id_of(cfg)).read_text())
 
 
 def _aoi_rings(aoi):
